@@ -6,6 +6,8 @@ import { store } from "@/lib/cache";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+// Allow up to 60s (Vercel Hobby max) — synthesising the brief is one longer call.
+export const maxDuration = 60;
 
 // Regenerate the brief at most this often unless ?refresh=1 is passed.
 const BRIEF_TTL_MS = 30 * 60 * 1000;

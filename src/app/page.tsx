@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   Brief,
   CalendarEvent,
+  Classification,
   ClassifiedItem,
   EventImpact,
+  NewsItem,
   Quote,
   Stance,
 } from "@/lib/types";
@@ -14,6 +16,54 @@ const POLL_MS = 60_000;
 const CALENDAR_POLL_MS = 5 * 60_000;
 // Fire a desktop alert only for genuinely market-moving, directional headlines.
 const ALERT_IMPACT = 3;
+// Classify unseen headlines in small parallel batches so the UI colourises fast.
+const CLASSIFY_CHUNK = 20;
+const CLASS_CACHE_KEY = "gp_class_v1";
+const BRIEF_CACHE_KEY = "gp_brief_v1";
+const BRIEF_TTL_MS = 30 * 60_000;
+
+type ClassMap = Record<string, Classification>;
+
+// Classifications are cached in the browser so a headline is only ever sent to
+// the model once — polls re-classify nothing already seen. This also sidesteps
+// serverless statelessness: the cache lives with the user, not the function.
+function readClassCache(): ClassMap {
+  if (typeof window === "undefined") return {};
+  try {
+    return JSON.parse(localStorage.getItem(CLASS_CACHE_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function writeClassCache(map: ClassMap) {
+  if (typeof window === "undefined") return;
+  try {
+    const entries = Object.entries(map);
+    const capped = entries.length > 800 ? entries.slice(entries.length - 800) : entries;
+    localStorage.setItem(CLASS_CACHE_KEY, JSON.stringify(Object.fromEntries(capped)));
+  } catch {
+    /* storage full/unavailable — non-fatal */
+  }
+}
+
+function readBriefCache(): { brief: Brief; at: number } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return JSON.parse(localStorage.getItem(BRIEF_CACHE_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function writeBriefCache(brief: Brief) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(BRIEF_CACHE_KEY, JSON.stringify({ brief, at: Date.now() }));
+  } catch {
+    /* non-fatal */
+  }
+}
 
 type Filter = "all" | "bullish" | "bearish" | "high-impact";
 
@@ -352,53 +402,119 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
   const [alertsOn, setAlertsOn] = useState(false);
+
   const briefLoaded = useRef(false);
-  const seenIds = useRef<Set<string> | null>(null);
+  const classCache = useRef<ClassMap>({});
+  const seenIds = useRef<Set<string>>(new Set());
+  const seeded = useRef(false);
+  const notifyQueue = useRef<Set<string>>(new Set());
   const alertsOnRef = useRef(false);
 
-  const maybeNotify = useCallback((incoming: ClassifiedItem[]) => {
-    // First load just seeds the "seen" set — never alert on the backlog.
-    if (seenIds.current === null) {
-      seenIds.current = new Set(incoming.map((i) => i.id));
-      return;
-    }
-    const seen = seenIds.current;
-    for (const it of incoming) {
-      if (seen.has(it.id)) continue;
-      seen.add(it.id);
-      const c = it.classification;
-      const directional = c && (c.stance === "bullish" || c.stance === "bearish");
-      if (
-        alertsOnRef.current &&
-        directional &&
-        c!.impact >= ALERT_IMPACT &&
-        typeof Notification !== "undefined" &&
-        Notification.permission === "granted"
-      ) {
-        const arrow = c!.stance === "bullish" ? "▲" : "▼";
-        new Notification(`${arrow} ${c!.stance.toUpperCase()} for gold`, {
-          body: `${it.title}\n${c!.rationale}`,
-          tag: it.id,
-        });
-      }
-    }
+  const decorate = useCallback(
+    (news: NewsItem[]): ClassifiedItem[] =>
+      news.map((n) => ({ ...n, classification: classCache.current[n.id] })),
+    []
+  );
+
+  const fireNotification = useCallback((it: ClassifiedItem) => {
+    const c = it.classification;
+    if (!c || !alertsOnRef.current) return;
+    if (c.stance === "neutral" || c.impact < ALERT_IMPACT) return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    const arrow = c.stance === "bullish" ? "▲" : "▼";
+    new Notification(`${arrow} ${c.stance.toUpperCase()} for gold`, {
+      body: `${it.title}\n${c.rationale}`,
+      tag: it.id,
+    });
   }, []);
+
+  // Send only headlines we haven't classified yet, in small parallel chunks,
+  // updating the UI (and cache) as each chunk returns.
+  const classifyMissing = useCallback(
+    async (news: NewsItem[]) => {
+      const missing = news.filter((n) => !classCache.current[n.id]);
+      if (missing.length === 0) return;
+      const chunks: NewsItem[][] = [];
+      for (let i = 0; i < missing.length; i += CLASSIFY_CHUNK) {
+        chunks.push(missing.slice(i, i + CLASSIFY_CHUNK));
+      }
+      await Promise.all(
+        chunks.map(async (chunk) => {
+          try {
+            const res = await fetch("/api/classify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                items: chunk.map((n) => ({
+                  id: n.id,
+                  title: n.title,
+                  source: n.source,
+                  summary: n.summary,
+                })),
+              }),
+            });
+            const data = await res.json();
+            const list: Array<{ id: string } & Classification> = data.classifications ?? [];
+            if (list.length === 0) return;
+            for (const c of list) {
+              classCache.current[c.id] = {
+                stance: c.stance,
+                confidence: c.confidence,
+                impact: c.impact,
+                rationale: c.rationale,
+              };
+              if (notifyQueue.current.has(c.id)) {
+                notifyQueue.current.delete(c.id);
+                const src = chunk.find((m) => m.id === c.id);
+                if (src) fireNotification({ ...src, classification: classCache.current[c.id] });
+              }
+            }
+            writeClassCache(classCache.current);
+            setItems((prev) =>
+              prev.map((it) =>
+                classCache.current[it.id]
+                  ? { ...it, classification: classCache.current[it.id] }
+                  : it
+              )
+            );
+          } catch {
+            /* leave this chunk unclassified; a later poll retries */
+          }
+        })
+      );
+    },
+    [fireNotification]
+  );
 
   const loadFeed = useCallback(async () => {
     try {
       const res = await fetch("/api/feed", { cache: "no-store" });
       const data = await res.json();
       setConfigured(data.configured);
-      const incoming: ClassifiedItem[] = data.items ?? [];
-      maybeNotify(incoming);
-      setItems(incoming);
+      const news: NewsItem[] = data.items ?? [];
+
+      // Seed the "seen" set silently on first load; after that, new arrivals
+      // become alert-eligible once their classification comes back.
+      if (!seeded.current) {
+        for (const n of news) seenIds.current.add(n.id);
+        seeded.current = true;
+      } else {
+        for (const n of news) {
+          if (!seenIds.current.has(n.id)) {
+            seenIds.current.add(n.id);
+            notifyQueue.current.add(n.id);
+          }
+        }
+      }
+
+      setItems(decorate(news));
       setUpdatedAt(data.updatedAt ?? null);
+      setLoading(false);
+      if (data.configured) classifyMissing(news);
     } catch {
-      // Keep whatever we last had on a transient network error.
-    } finally {
       setLoading(false);
     }
-  }, [maybeNotify]);
+  }, [decorate, classifyMissing]);
 
   const loadPrice = useCallback(async () => {
     try {
@@ -440,19 +556,33 @@ export default function Home() {
   }, [alertsOn]);
 
   const loadBrief = useCallback(async (refresh = false) => {
+    if (!refresh) {
+      const cached = readBriefCache();
+      if (cached && Date.now() - cached.at < BRIEF_TTL_MS) {
+        setBrief(cached.brief);
+        return;
+      }
+    }
     try {
       const res = await fetch(`/api/brief${refresh ? "?refresh=1" : ""}`, {
         cache: "no-store",
       });
       const data = await res.json();
       setConfigured(data.configured);
-      if (data.brief) setBrief(data.brief);
+      if (data.brief) {
+        setBrief(data.brief);
+        writeBriefCache(data.brief);
+      }
     } catch {
       /* ignore */
     }
   }, []);
 
   useEffect(() => {
+    classCache.current = readClassCache();
+    const cachedBrief = readBriefCache();
+    if (cachedBrief) setBrief(cachedBrief.brief);
+
     loadFeed();
     loadPrice();
     loadCalendar();
