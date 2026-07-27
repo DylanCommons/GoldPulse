@@ -1,0 +1,207 @@
+import Anthropic from "@anthropic-ai/sdk";
+import { Brief, CalendarEvent, Classification, NewsItem, Stance } from "./types";
+
+const CLASSIFY_MODEL = process.env.CLASSIFY_MODEL ?? "claude-haiku-4-5-20251001";
+const BRIEF_MODEL = process.env.BRIEF_MODEL ?? "claude-sonnet-5";
+
+export function hasKey(): boolean {
+  return Boolean(process.env.ANTHROPIC_API_KEY);
+}
+
+function client(): Anthropic | null {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return null;
+  return new Anthropic({ apiKey });
+}
+
+const STANCES: Stance[] = ["bullish", "bearish", "neutral"];
+
+function coerceStance(v: unknown): Stance {
+  const s = String(v).toLowerCase();
+  return (STANCES as string[]).includes(s) ? (s as Stance) : "neutral";
+}
+
+function clamp(n: unknown, min: number, max: number, fallback: number): number {
+  const x = Number(n);
+  if (Number.isNaN(x)) return fallback;
+  return Math.min(max, Math.max(min, x));
+}
+
+/** Pull the first JSON value (object or array) out of a model response. */
+function extractJson(text: string): unknown {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const body = fenced ? fenced[1] : text;
+  const start = body.search(/[[{]/);
+  if (start === -1) throw new Error("no json found");
+  const open = body[start];
+  const close = open === "[" ? "]" : "}";
+  let depth = 0;
+  for (let i = start; i < body.length; i++) {
+    if (body[i] === open) depth++;
+    else if (body[i] === close) {
+      depth--;
+      if (depth === 0) return JSON.parse(body.slice(start, i + 1));
+    }
+  }
+  throw new Error("unbalanced json");
+}
+
+const CLASSIFY_SYSTEM = `You are a sharp gold (XAU/USD) trading desk analyst. You judge news for its
+effect on the SPOT GOLD PRICE over the next few hours to days — the horizon of a day trader.
+
+Reason through the standard transmission channels:
+- US dollar (DXY): stronger USD = bearish gold, weaker USD = bullish gold.
+- US real yields / rate expectations: higher yields or hawkish Fed = bearish; cuts/dovish = bullish.
+- Inflation surprises: hotter CPI/PCE is mixed — hawkish-Fed reaction usually wins short-term (bearish),
+  though persistent inflation can be bullish. Weigh the likely Fed reaction.
+- Risk sentiment & geopolitics: war, crisis, banking stress = safe-haven bid = bullish.
+- Physical/flow: central-bank buying, ETF flows, strong physical demand = bullish.
+
+For EACH numbered headline return an object with:
+  i: the item number
+  stance: "bullish" | "bearish" | "neutral"  (effect on the gold price)
+  confidence: 0.0-1.0
+  impact: 0-5  (how market-moving for gold specifically; 0 = irrelevant/off-topic, 5 = major mover like an FOMC decision or CPI print)
+  rationale: ONE concise sentence naming the channel (e.g. "Dovish Fed tilt pressures USD and real yields — supportive for gold").
+
+Off-topic or non-financial headlines get stance "neutral", impact 0.
+Respond with ONLY a JSON array, no prose.`;
+
+/** Classify a batch of headlines. Returns a map of item.id -> Classification. */
+export async function classifyHeadlines(
+  items: NewsItem[]
+): Promise<Map<string, Classification>> {
+  const out = new Map<string, Classification>();
+  const anthropic = client();
+  if (!anthropic || items.length === 0) return out;
+
+  const BATCH = 40;
+  for (let start = 0; start < items.length; start += BATCH) {
+    const batch = items.slice(start, start + BATCH);
+    const list = batch
+      .map((it, i) => {
+        const ctx = it.summary ? ` — ${it.summary.slice(0, 180)}` : "";
+        return `${i + 1}. [${it.source}] ${it.title}${ctx}`;
+      })
+      .join("\n");
+
+    try {
+      const msg = await anthropic.messages.create({
+        model: CLASSIFY_MODEL,
+        max_tokens: 4096,
+        system: CLASSIFY_SYSTEM,
+        messages: [{ role: "user", content: `Headlines:\n${list}` }],
+      });
+      const text = msg.content
+        .filter((b): b is Anthropic.TextBlock => b.type === "text")
+        .map((b) => b.text)
+        .join("");
+      const parsed = extractJson(text) as Array<Record<string, unknown>>;
+      for (const row of parsed) {
+        const idx = Number(row.i) - 1;
+        const item = batch[idx];
+        if (!item) continue;
+        out.set(item.id, {
+          stance: coerceStance(row.stance),
+          confidence: clamp(row.confidence, 0, 1, 0.5),
+          impact: clamp(row.impact, 0, 5, 0),
+          rationale: String(row.rationale ?? "").slice(0, 300),
+        });
+      }
+    } catch {
+      // Leave this batch unclassified rather than failing the whole request.
+    }
+  }
+  return out;
+}
+
+const BRIEF_SYSTEM = `You are the morning strategist for a gold (XAU/USD) day trader.
+From the supplied recent headlines, write a tight pre-session brief on what is driving gold
+and the near-term directional bias. Be concrete and honest about uncertainty — this is
+decision support, not a signal to trade blindly.
+
+Return ONLY a JSON object:
+{
+  "headline": "one-line verdict, e.g. 'Gold leaning bullish as USD softens into US session'",
+  "bias": "bullish" | "bearish" | "neutral",
+  "summary": "2-3 short markdown paragraphs on the macro backdrop, the dominant channel (USD, yields, risk, flows), and how it's tilting gold",
+  "drivers": [
+    { "title": "short driver name", "detail": "one sentence on why it matters for gold", "stance": "bullish|bearish|neutral" }
+  ],
+  "watchlist": ["specific things to watch today — scheduled data, Fed speakers, geopolitical flashpoints, key levels if mentioned"]
+}
+Give 3-5 drivers and 3-6 watchlist items. No text outside the JSON.`;
+
+function formatEventLine(e: CalendarEvent): string {
+  const t = new Date(e.date).toLocaleString("en-US", {
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/New_York",
+  });
+  const nums = [
+    e.actual != null ? `actual ${e.actual}` : null,
+    e.forecast != null ? `forecast ${e.forecast}` : null,
+    e.previous != null ? `prev ${e.previous}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  return `${t} ET · ${e.country} · ${e.title} [${e.impact}]${nums ? ` (${nums})` : ""}`;
+}
+
+export async function generateBrief(
+  items: NewsItem[],
+  events: CalendarEvent[] = []
+): Promise<Brief | null> {
+  const anthropic = client();
+  if (!anthropic) return null;
+
+  const recent = items.slice(0, 35);
+  const list = recent
+    .map((it, i) => `${i + 1}. [${it.source}] ${it.title}${it.summary ? ` — ${it.summary.slice(0, 160)}` : ""}`)
+    .join("\n");
+
+  const calendarBlock =
+    events.length > 0
+      ? `\n\nScheduled economic events this week (times ET). Use these for the "watch today" list and to flag catalysts BEFORE they hit:\n${events
+          .map(formatEventLine)
+          .join("\n")}`
+      : "";
+
+  try {
+    const msg = await anthropic.messages.create({
+      model: BRIEF_MODEL,
+      max_tokens: 2048,
+      system: BRIEF_SYSTEM,
+      messages: [
+        {
+          role: "user",
+          content: `Today's recent gold-relevant headlines:\n${list}${calendarBlock}\n\nWrite the brief.`,
+        },
+      ],
+    });
+    const text = msg.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("");
+    const j = extractJson(text) as Record<string, unknown>;
+    return {
+      generatedAt: new Date().toISOString(),
+      headline: String(j.headline ?? "Gold brief"),
+      bias: coerceStance(j.bias),
+      summary: String(j.summary ?? ""),
+      drivers: Array.isArray(j.drivers)
+        ? (j.drivers as Array<Record<string, unknown>>).slice(0, 6).map((d) => ({
+            title: String(d.title ?? ""),
+            detail: String(d.detail ?? ""),
+            stance: coerceStance(d.stance),
+          }))
+        : [],
+      watchlist: Array.isArray(j.watchlist)
+        ? (j.watchlist as unknown[]).slice(0, 8).map((w) => String(w))
+        : [],
+    };
+  } catch {
+    return null;
+  }
+}
