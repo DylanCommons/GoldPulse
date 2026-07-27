@@ -350,11 +350,13 @@ function MiniChart({ series, levels, up }: { series: number[]; levels: PriceLeve
   const nowPct = (y(last) / H) * 100;
 
   return (
-    <div className="relative mt-3">
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="block h-48 w-full sm:h-56">
+    // Left gutter = live-price flag; right gutter = level axis. The plot sits
+    // between them, so the line/area never run under any label text.
+    <div className="relative mt-3 pl-[58px] pr-[80px]">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="block h-52 w-full sm:h-60">
         <defs>
           <linearGradient id={gid} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor={stroke} stopOpacity="0.18" />
+            <stop offset="0%" stopColor={stroke} stopOpacity="0.16" />
             <stop offset="100%" stopColor={stroke} stopOpacity="0" />
           </linearGradient>
         </defs>
@@ -367,9 +369,9 @@ function MiniChart({ series, levels, up }: { series: number[]; levels: PriceLeve
             y2={y(l.price)}
             stroke={l.color}
             strokeWidth="1"
-            strokeDasharray="4 4"
+            strokeDasharray="4 5"
             vectorEffect="non-scaling-stroke"
-            opacity="0.55"
+            opacity="0.5"
           />
         ))}
         {/* live price line */}
@@ -396,30 +398,30 @@ function MiniChart({ series, levels, up }: { series: number[]; levels: PriceLeve
         />
       </svg>
 
-      {/* level label + price on the right, crisp HTML so it isn't stretched */}
+      {/* right axis: level label + price, sitting entirely in the gutter */}
       {shown.map((l, i) => (
         <span
           key={i}
           style={{ top: `${l.yPct}%` }}
-          className="pointer-events-none absolute right-1 flex -translate-y-1/2 items-center gap-1 rounded bg-white/85 px-1 text-[10px] font-medium tabular-nums"
+          className="pointer-events-none absolute right-0 flex w-[74px] -translate-y-1/2 items-center justify-end gap-1 text-[11px] font-medium tabular-nums"
         >
           <span className="text-stone-400">{l.label}</span>
           <span style={{ color: l.color }}>{fmtPrice(l.price)}</span>
         </span>
       ))}
 
-      {/* live price tag on the left */}
+      {/* left gutter: live price flag */}
       <span
         style={{ top: `${nowPct}%` }}
-        className="pointer-events-none absolute left-1 -translate-y-1/2 rounded bg-amber-500 px-1 text-[10px] font-semibold tabular-nums text-white"
+        className="pointer-events-none absolute left-0 -translate-y-1/2 rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-white shadow-sm"
       >
         ${fmtPrice(last)}
       </span>
 
-      {/* live price dot on the right edge */}
+      {/* live dot at the plot's right edge (end of the line) */}
       <span
         style={{ top: `${nowPct}%`, backgroundColor: stroke }}
-        className="pointer-events-none absolute right-0 h-2.5 w-2.5 -translate-y-1/2 translate-x-1/2 rounded-full ring-2 ring-white"
+        className="pointer-events-none absolute right-[80px] h-2.5 w-2.5 -translate-y-1/2 translate-x-1/2 rounded-full ring-2 ring-white"
       />
     </div>
   );
@@ -1766,13 +1768,13 @@ export default function Home() {
 
         {levels && (
           <div className="mb-4">
-            <LevelsCard data={levels} timeframe={timeframe} onTimeframe={changeTimeframe} />
+            <RecommendationsCard ideas={setups} trades={trades} price={levels.price} icc={iccState} onTake={takeTrade} />
           </div>
         )}
 
         {levels && (
           <div className="mb-4">
-            <RecommendationsCard ideas={setups} trades={trades} price={levels.price} icc={iccState} onTake={takeTrade} />
+            <LevelsCard data={levels} timeframe={timeframe} onTimeframe={changeTimeframe} />
           </div>
         )}
 
