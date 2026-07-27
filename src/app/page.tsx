@@ -319,14 +319,15 @@ function LevelRow({ level, current }: { level: PriceLevel; current: number }) {
   );
 }
 
-// Inline SVG sparkline of recent price action with nearby pivot levels overlaid.
+// Inline SVG sparkline of recent price action with nearby levels + live price overlaid.
 function MiniChart({ series, levels, up }: { series: number[]; levels: PriceLevel[]; up: boolean }) {
   if (series.length < 2) return null;
   const W = 600;
-  const H = 120;
+  const H = 240;
+  const last = series[series.length - 1];
   const lo = Math.min(...series);
   const hi = Math.max(...series);
-  const pad = (hi - lo) * 0.12 || 1;
+  const pad = (hi - lo) * 0.14 || 1;
   const min = lo - pad;
   const max = hi + pad;
   const x = (i: number) => (i / (series.length - 1)) * W;
@@ -343,12 +344,13 @@ function MiniChart({ series, levels, up }: { series: number[]; levels: PriceLeve
     .map((l) => ({
       ...l,
       yPct: (y(l.price) / H) * 100,
-      color: l.kind === "pivot" ? "#a8a29e" : l.price > series[series.length - 1] ? "#fb7185" : "#34d399",
+      color: l.kind === "pivot" ? "#a8a29e" : l.price > last ? "#f43f5e" : "#10b981",
     }));
+  const nowPct = (y(last) / H) * 100;
 
   return (
     <div className="relative mt-3">
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="block h-20 w-full">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="block h-48 w-full sm:h-56">
         <defs>
           <linearGradient id={gid} x1="0" x2="0" y1="0" y2="1">
             <stop offset="0%" stopColor={stroke} stopOpacity="0.18" />
@@ -366,40 +368,58 @@ function MiniChart({ series, levels, up }: { series: number[]; levels: PriceLeve
             strokeWidth="1"
             strokeDasharray="4 4"
             vectorEffect="non-scaling-stroke"
-            opacity="0.6"
+            opacity="0.55"
           />
         ))}
+        {/* live price line */}
+        <line
+          x1="0"
+          x2={W}
+          y1={y(last)}
+          y2={y(last)}
+          stroke="#f59e0b"
+          strokeWidth="1"
+          strokeDasharray="2 3"
+          vectorEffect="non-scaling-stroke"
+          opacity="0.7"
+        />
         <path d={areaPath} fill={`url(#${gid})`} />
         <polyline
           points={linePts}
           fill="none"
           stroke={stroke}
-          strokeWidth="1.75"
+          strokeWidth="2"
           strokeLinejoin="round"
           strokeLinecap="round"
           vectorEffect="non-scaling-stroke"
         />
       </svg>
-      {/* crisp HTML overlays so labels + dot aren't distorted by the stretch */}
+
+      {/* level label + price on the right, crisp HTML so it isn't stretched */}
       {shown.map((l, i) => (
         <span
           key={i}
           style={{ top: `${l.yPct}%` }}
-          className="pointer-events-none absolute right-1 -translate-y-1/2 rounded bg-white/80 px-1 text-[9px] font-medium tabular-nums text-stone-400"
+          className="pointer-events-none absolute right-1 flex -translate-y-1/2 items-center gap-1 rounded bg-white/85 px-1 text-[10px] font-medium tabular-nums"
         >
-          {l.label}
+          <span className="text-stone-400">{l.label}</span>
+          <span style={{ color: l.color }}>{fmtPrice(l.price)}</span>
         </span>
       ))}
+
+      {/* live price tag on the left */}
       <span
-        style={{ top: `${(y(series[series.length - 1]) / H) * 100}%` }}
-        className="pointer-events-none absolute right-0 h-2 w-2 -translate-y-1/2 translate-x-1/2 rounded-full ring-2 ring-white"
-        // color set inline to match the line
+        style={{ top: `${nowPct}%` }}
+        className="pointer-events-none absolute left-1 -translate-y-1/2 rounded bg-amber-500 px-1 text-[10px] font-semibold tabular-nums text-white"
       >
-        <span
-          className="block h-full w-full rounded-full"
-          style={{ backgroundColor: stroke }}
-        />
+        ${fmtPrice(last)}
       </span>
+
+      {/* live price dot on the right edge */}
+      <span
+        style={{ top: `${nowPct}%`, backgroundColor: stroke }}
+        className="pointer-events-none absolute right-0 h-2.5 w-2.5 -translate-y-1/2 translate-x-1/2 rounded-full ring-2 ring-white"
+      />
     </div>
   );
 }
