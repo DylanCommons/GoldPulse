@@ -718,17 +718,20 @@ function irishParts(ts: number) {
 
 type SessionState = "prime" | "caution" | "off";
 
-// Windows in IST minutes: London 09:00–11:00 (540–660), NY overlap 15:00–16:30
-// (900–990); spike windows around 13:30 and 14:30 US prints.
+// Windows in IST minutes. Prime: London 09:00–11:00 (540–660) and NY 15:00–16:30
+// (900–990). Caution: the 13:30 US data spike, and the NY open (14:30) chop that
+// Dylan sits out until ~15:00 before taking a cleaner continuation.
+const CAUTIONS: { a: number; b: number; label: string }[] = [
+  { a: 805, b: 820, label: "US 13:30 data spike — wait for the dust to settle" },
+  { a: 865, b: 900, label: "NY open (14:30) chop — you wait until ~15:00 for a cleaner continuation" },
+];
+
 function sessionInfo(minutes: number): { state: SessionState; label: string } {
-  for (const [a, b] of [
-    [805, 820],
-    [865, 880],
-  ]) {
-    if (minutes >= a && minutes < b) return { state: "caution", label: "US data-spike window — wait for the dust to settle" };
+  for (const c of CAUTIONS) {
+    if (minutes >= c.a && minutes < c.b) return { state: "caution", label: c.label };
   }
   if (minutes >= 540 && minutes < 660) return { state: "prime", label: "London session — prime (first trend leg)" };
-  if (minutes >= 900 && minutes < 990) return { state: "prime", label: "NY overlap — prime (deepest liquidity)" };
+  if (minutes >= 900 && minutes < 990) return { state: "prime", label: "NY session — prime (post-open, chop cleared)" };
   return { state: "off", label: "Outside your prime windows" };
 }
 
@@ -782,7 +785,7 @@ function SessionPanel({ now, upcoming }: { now: number; upcoming: CalendarEvent[
             <span className={`h-1.5 w-1.5 rounded-full ${ui.dot}`} />
             {sess.state === "prime" ? "Prime window" : sess.state === "caution" ? "Caution" : "Off-window"}
           </span>
-          {sess.state === "off" && (
+          {sess.state !== "prime" && (
             <span className="text-xs text-stone-400">{next.name} in {fmtDur(next.mins)}</span>
           )}
         </div>
