@@ -816,8 +816,9 @@ function SessionPanel({ now, upcoming }: { now: number; upcoming: CalendarEvent[
 const CHECKLIST_ITEMS = [
   "With the higher-timeframe trend (D / 4H / 1H bias)",
   "Confirmed ICC continuation — broke last minor HL/LH (not mid-correction)",
+  "Reward ≥ 3R with a tight stop just beyond the structure",
   "Stop placed — and I will NOT move it",
-  "Target set into a pre-identified level",
+  "Target banks into a pre-identified level",
   "Good window (London 09–11 / NY 15–16:30), not chop or a data spike",
   "Planned & carded — not an impulse phone trade",
   "Risk size deliberate — not scaled up on a streak",
@@ -966,8 +967,8 @@ function RecommendationsCard({
 
       {ideas.length === 0 ? (
         <p className="mt-3 text-sm text-stone-400">
-          No clean with-trend setup at these levels right now. Wait for price to reach a level, or
-          switch timeframe.
+          No with-trend setup clears your 3R minimum at these levels right now. Wait for price to
+          reach a level, or switch timeframe.
         </p>
       ) : (
         <div className="mt-3 space-y-2.5">
@@ -1037,8 +1038,8 @@ function RecommendationsCard({
         </div>
       )}
       <p className="mt-3 text-[11px] leading-relaxed text-stone-400">
-        With-trend plans keyed to computed levels — you still confirm the ICC continuation. Not
-        financial advice.
+        With-trend plans, ≥3R with a tight structural stop — you still confirm the ICC continuation.
+        Not financial advice.
       </p>
     </section>
   );
