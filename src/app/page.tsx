@@ -12,9 +12,13 @@ import type {
   NewsItem,
   PriceLevel,
   Quote,
+  SetupType,
   Stance,
+  Trade,
+  TradeIdea,
   Trend,
 } from "@/lib/types";
+import { generateRecommendations } from "@/lib/recommend";
 
 const POLL_MS = 60_000;
 const CALENDAR_POLL_MS = 5 * 60_000;
@@ -72,6 +76,33 @@ function writeBriefCache(brief: Brief) {
     /* non-fatal */
   }
 }
+
+const TRADES_KEY = "gp_trades_v1";
+
+function readTrades(): Trade[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(TRADES_KEY);
+    return raw ? (JSON.parse(raw) as Trade[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeTrades(trades: Trade[]) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(TRADES_KEY, JSON.stringify(trades.slice(-200)));
+  } catch {
+    /* non-fatal */
+  }
+}
+
+const SETUP_LABEL: Record<SetupType, string> = {
+  "trend-retest": "Trend retest",
+  "trend-breakout": "Trend breakout",
+  "range-fade": "Range fade",
+};
 
 type Filter = "all" | "bullish" | "bearish" | "high-impact";
 
@@ -880,12 +911,288 @@ function ChecklistCard({ now }: { now: number }) {
   );
 }
 
+// ————— Recommendations (with-trend, level-triggered plans) —————
+const DIR_UI: Record<"long" | "short", { label: string; cls: string; arrow: string }> = {
+  long: { label: "LONG", cls: "border-emerald-200 bg-emerald-50 text-emerald-700", arrow: "▲" },
+  short: { label: "SHORT", cls: "border-rose-200 bg-rose-50 text-rose-700", arrow: "▼" },
+};
+const CONVICTION_UI: Record<string, string> = {
+  high: "text-emerald-600",
+  medium: "text-stone-500",
+  low: "text-amber-600",
+};
+
+function RecommendationsCard({
+  ideas,
+  trades,
+  price,
+  onTake,
+}: {
+  ideas: TradeIdea[];
+  trades: Trade[];
+  price: number;
+  onTake: (idea: TradeIdea) => void;
+}) {
+  const resolved = trades.filter((t) => t.status === "win" || t.status === "loss");
+  const wins = resolved.filter((t) => t.status === "win").length;
+  const totalR = resolved.reduce((s, t) => s + (t.resultR ?? 0), 0);
+  const winRate = resolved.length ? Math.round((wins / resolved.length) * 100) : null;
+  const statForType = (type: SetupType) => {
+    const d = resolved.filter((t) => t.setupType === type);
+    return { n: d.length, w: d.filter((t) => t.status === "win").length };
+  };
+
+  return (
+    <section className={`${CARD} p-6`}>
+      <div className="flex items-center justify-between">
+        <span className={EYEBROW}>Setups</span>
+        {winRate != null && (
+          <span className="text-[11px] text-stone-400">
+            Your record:{" "}
+            <span className="font-medium text-stone-600">
+              {winRate}% ({wins}/{resolved.length})
+            </span>{" "}
+            ·{" "}
+            <span className={totalR >= 0 ? "text-emerald-600" : "text-rose-600"}>
+              {totalR >= 0 ? "+" : ""}
+              {totalR.toFixed(1)}R
+            </span>
+          </span>
+        )}
+      </div>
+
+      {ideas.length === 0 ? (
+        <p className="mt-3 text-sm text-stone-400">
+          No clean with-trend setup at these levels right now. Wait for price to reach a level, or
+          switch timeframe.
+        </p>
+      ) : (
+        <div className="mt-3 space-y-2.5">
+          {ideas.map((idea) => {
+            const dir = DIR_UI[idea.direction];
+            const away = price ? ((idea.entry - price) / price) * 100 : 0;
+            const st = statForType(idea.setupType);
+            const watching = trades.some((t) => t.status === "open" && t.id.startsWith(idea.id));
+            const weak = st.n >= 4 && st.w / st.n < 0.4;
+            return (
+              <div key={idea.id} className="rounded-xl border border-stone-200/80 bg-stone-50/50 p-3.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${dir.cls}`}
+                    >
+                      {dir.arrow} {dir.label}
+                    </span>
+                    <span className="text-xs text-stone-400">
+                      {SETUP_LABEL[idea.setupType]} ·{" "}
+                      <span className={CONVICTION_UI[idea.conviction]}>{idea.conviction} conviction</span>
+                    </span>
+                  </div>
+                  <span className="text-xs font-medium tabular-nums text-stone-500">{idea.rr}R</span>
+                </div>
+
+                <p className="mt-2 text-sm text-stone-800">
+                  If price reaches{" "}
+                  <span className="font-semibold tabular-nums">${fmtPrice(idea.entry)}</span>{" "}
+                  <span className="text-stone-400">({idea.triggerLabel})</span> →{" "}
+                  <span className="font-semibold">{idea.direction === "long" ? "long" : "short"}</span>{" "}
+                  to <span className="font-semibold tabular-nums">${fmtPrice(idea.target)}</span>{" "}
+                  <span className="text-stone-400">({idea.targetLabel})</span>, stop{" "}
+                  <span className="tabular-nums">${fmtPrice(idea.stop)}</span>
+                </p>
+                <p className="mt-1 text-xs text-stone-500">{idea.rationale}</p>
+
+                <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] text-stone-400">
+                    {Math.abs(away) < 0.01 ? "at level now" : `entry ${away >= 0 ? "+" : ""}${away.toFixed(2)}% away`}
+                    {st.n > 0 && (
+                      <>
+                        {" · "}
+                        <span className={weak ? "text-amber-600" : "text-stone-500"}>
+                          your {SETUP_LABEL[idea.setupType].toLowerCase()}: {st.w}/{st.n}
+                          {weak ? " ⚠" : ""}
+                        </span>
+                      </>
+                    )}
+                  </span>
+                  {watching ? (
+                    <span className="rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-400">
+                      Watching…
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => onTake(idea)}
+                      className="rounded-lg bg-stone-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-stone-700"
+                    >
+                      Took trade
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <p className="mt-3 text-[11px] leading-relaxed text-stone-400">
+        With-trend plans keyed to computed levels — you still confirm the ICC continuation. Not
+        financial advice.
+      </p>
+    </section>
+  );
+}
+
+function TradesCard({
+  trades,
+  price,
+  onResolve,
+  onClose,
+}: {
+  trades: Trade[];
+  price: number;
+  onResolve: (id: string, result: "win" | "loss") => void;
+  onClose: (id: string) => void;
+}) {
+  const [showHist, setShowHist] = useState(false);
+  const open = trades.filter((t) => t.status === "open");
+  const resolved = trades.filter((t) => t.status !== "open").slice().reverse();
+  const wins = resolved.filter((t) => t.status === "win").length;
+  const losses = resolved.filter((t) => t.status === "loss").length;
+  const totalR = resolved.reduce((s, t) => s + (t.resultR ?? 0), 0);
+  if (trades.length === 0) return null;
+
+  return (
+    <section className={`${CARD} p-6`}>
+      <div className="flex items-center justify-between">
+        <span className={EYEBROW}>Trades — watch &amp; learn</span>
+        <span className="text-[11px] text-stone-400">
+          {wins}W / {losses}L ·{" "}
+          <span className={totalR >= 0 ? "text-emerald-600" : "text-rose-600"}>
+            {totalR >= 0 ? "+" : ""}
+            {totalR.toFixed(1)}R
+          </span>
+        </span>
+      </div>
+
+      {open.length > 0 && (
+        <div className="mt-3 space-y-2.5">
+          {open.map((t) => {
+            const dir = DIR_UI[t.direction];
+            const span = t.target - t.stop;
+            const pos = span ? Math.max(0, Math.min(1, (price - t.stop) / span)) : 0;
+            const toTarget = t.direction === "long" ? t.target - price : price - t.target;
+            const toStop = t.direction === "long" ? price - t.stop : t.stop - price;
+            return (
+              <div key={t.id} className="rounded-xl border border-stone-200/80 bg-white p-3.5">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-2">
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-semibold ${dir.cls}`}
+                    >
+                      {dir.arrow} {dir.label}
+                    </span>
+                    <span className="text-xs text-stone-400">
+                      {SETUP_LABEL[t.setupType]} · {t.rr}R
+                    </span>
+                  </span>
+                  <span className="text-xs tabular-nums text-stone-500">
+                    ${fmtPrice(t.entry)} → ${fmtPrice(t.target)}
+                  </span>
+                </div>
+
+                {/* stop —— price —— target progress */}
+                <div className="relative mt-2.5 h-1.5 rounded-full bg-gradient-to-r from-rose-200 via-stone-200 to-emerald-200">
+                  <span
+                    style={{ left: `${pos * 100}%` }}
+                    className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-stone-900 shadow"
+                  />
+                </div>
+                <div className="mt-1 flex justify-between text-[11px] tabular-nums text-stone-400">
+                  <span>stop ${fmtPrice(t.stop)}</span>
+                  <span className="text-stone-500">now ${fmtPrice(price)}</span>
+                  <span>target ${fmtPrice(t.target)}</span>
+                </div>
+
+                <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[11px] text-stone-400">
+                    {toTarget >= 0 ? `${fmtPrice(Math.abs(toTarget))} to target` : "past target"} ·{" "}
+                    {toStop >= 0 ? `${fmtPrice(Math.abs(toStop))} to stop` : "past stop"} · watching live
+                  </span>
+                  <span className="flex gap-1.5">
+                    <button
+                      onClick={() => onResolve(t.id, "win")}
+                      className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100"
+                    >
+                      Win
+                    </button>
+                    <button
+                      onClick={() => onResolve(t.id, "loss")}
+                      className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-100"
+                    >
+                      Loss
+                    </button>
+                    <button
+                      onClick={() => onClose(t.id)}
+                      className="rounded-md border border-stone-200 bg-white px-2 py-1 text-[11px] font-medium text-stone-500 hover:bg-stone-50"
+                    >
+                      Scratch
+                    </button>
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {resolved.length > 0 && (
+        <div className={open.length > 0 ? "mt-4 border-t border-stone-100 pt-3" : "mt-3"}>
+          <button onClick={() => setShowHist((s) => !s)} className="flex w-full items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">
+              History ({resolved.length})
+            </span>
+            <span className="text-stone-400">{showHist ? "▲" : "▼"}</span>
+          </button>
+          {showHist && (
+            <div className="mt-2 space-y-1">
+              {resolved.slice(0, 20).map((t) => {
+                const c =
+                  t.status === "win" ? "text-emerald-600" : t.status === "loss" ? "text-rose-600" : "text-stone-400";
+                return (
+                  <div key={t.id} className="flex items-center justify-between text-xs">
+                    <span className="flex items-center gap-2">
+                      <span className={`font-medium ${DIR_UI[t.direction].cls.includes("emerald") ? "text-emerald-700" : "text-rose-700"}`}>
+                        {DIR_UI[t.direction].label}
+                      </span>
+                      <span className="text-stone-500">
+                        {SETUP_LABEL[t.setupType]} · ${fmtPrice(t.entry)}→${fmtPrice(t.target)}
+                      </span>
+                    </span>
+                    <span className={`font-medium tabular-nums ${c}`}>
+                      {t.status === "win" ? "Win" : t.status === "loss" ? "Loss" : "Scratch"}{" "}
+                      {t.resultR != null && t.status !== "closed" ? `${t.resultR >= 0 ? "+" : ""}${t.resultR.toFixed(1)}R` : ""}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+      <p className="mt-3 text-[11px] text-stone-400">
+        Auto-resolves when price hits target/stop while this page is open; use the buttons if you
+        close manually.
+      </p>
+    </section>
+  );
+}
+
 export default function Home() {
   const [brief, setBrief] = useState<Brief | null>(null);
   const [items, setItems] = useState<ClassifiedItem[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [levels, setLevels] = useState<GoldLevels | null>(null);
   const [timeframe, setTimeframe] = useState<LevelTimeframe>("daily");
+  const [trades, setTrades] = useState<Trade[]>([]);
   const [calendar, setCalendar] = useState<{
     released: CalendarEvent[];
     todayUpcoming: CalendarEvent[];
@@ -1081,6 +1388,104 @@ export default function Home() {
     [loadLevels]
   );
 
+  const persistTrades = useCallback((updater: (prev: Trade[]) => Trade[]) => {
+    setTrades((prev) => {
+      const next = updater(prev);
+      writeTrades(next);
+      return next;
+    });
+  }, []);
+
+  const takeTrade = useCallback(
+    (idea: TradeIdea) => {
+      const trade: Trade = {
+        id: `${idea.id}#${Date.now()}`,
+        takenAt: Date.now(),
+        direction: idea.direction,
+        setupType: idea.setupType,
+        triggerLabel: idea.triggerLabel,
+        targetLabel: idea.targetLabel,
+        entry: idea.entry,
+        target: idea.target,
+        stop: idea.stop,
+        rr: idea.rr,
+        rationale: idea.rationale,
+        status: "open",
+      };
+      persistTrades((prev) => [...prev, trade]);
+    },
+    [persistTrades]
+  );
+
+  const resolveTrade = useCallback(
+    (id: string, result: "win" | "loss") => {
+      persistTrades((prev) =>
+        prev.map((t) =>
+          t.id === id && t.status === "open"
+            ? { ...t, status: result, resolvedAt: Date.now(), resultR: result === "win" ? t.rr : -1 }
+            : t
+        )
+      );
+    },
+    [persistTrades]
+  );
+
+  const closeTrade = useCallback(
+    (id: string) => {
+      persistTrades((prev) =>
+        prev.map((t) =>
+          t.id === id && t.status === "open"
+            ? { ...t, status: "closed", resolvedAt: Date.now(), resultR: 0 }
+            : t
+        )
+      );
+    },
+    [persistTrades]
+  );
+
+  // Watch open trades against the live price and auto-resolve win/loss.
+  useEffect(() => {
+    if (!levels) return;
+    const price = levels.price;
+    persistTrades((prev) => {
+      let changed = false;
+      const next: Trade[] = prev.map((t): Trade => {
+        if (t.status !== "open") return t;
+        const hitTarget = t.direction === "long" ? price >= t.target : price <= t.target;
+        const hitStop = t.direction === "long" ? price <= t.stop : price >= t.stop;
+        if (hitTarget || hitStop) {
+          changed = true;
+          const won = hitTarget && !hitStop;
+          if (
+            alertsOnRef.current &&
+            typeof Notification !== "undefined" &&
+            Notification.permission === "granted"
+          ) {
+            new Notification(won ? "✓ Trade hit target" : "✗ Trade hit stop", {
+              body: `${t.direction.toUpperCase()} ${SETUP_LABEL[t.setupType]} · ${won ? `+${t.rr}` : "-1"}R`,
+              tag: t.id,
+            });
+          }
+          return {
+            ...t,
+            status: won ? "win" : "loss",
+            resolvedAt: Date.now(),
+            resultR: won ? t.rr : -1,
+          };
+        }
+        return t;
+      });
+      return changed ? next : prev;
+    });
+    // persistTrades is stable; only re-run when levels (price) changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [levels]);
+
+  const recommendations = useMemo(
+    () => (levels ? generateRecommendations(levels, brief?.bias ?? "neutral") : []),
+    [levels, brief]
+  );
+
   const loadCalendar = useCallback(async () => {
     try {
       const res = await fetch("/api/calendar", { cache: "no-store" });
@@ -1137,6 +1542,7 @@ export default function Home() {
     classCache.current = readClassCache();
     const cachedBrief = readBriefCache();
     if (cachedBrief) setBrief(cachedBrief.brief);
+    setTrades(readTrades());
 
     setNow(Date.now());
     const clockId = setInterval(() => setNow(Date.now()), 15_000);
@@ -1254,6 +1660,28 @@ export default function Home() {
         {levels && (
           <div className="mb-4">
             <LevelsCard data={levels} timeframe={timeframe} onTimeframe={changeTimeframe} />
+          </div>
+        )}
+
+        {levels && (
+          <div className="mb-4">
+            <RecommendationsCard
+              ideas={recommendations}
+              trades={trades}
+              price={levels.price}
+              onTake={takeTrade}
+            />
+          </div>
+        )}
+
+        {trades.length > 0 && levels && (
+          <div className="mb-4">
+            <TradesCard
+              trades={trades}
+              price={levels.price}
+              onResolve={resolveTrade}
+              onClose={closeTrade}
+            />
           </div>
         )}
 

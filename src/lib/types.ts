@@ -111,3 +111,41 @@ export interface GoldLevels {
   /** Trend read from price vs the EMAs. */
   trend: Trend;
 }
+
+export type TradeDirection = "long" | "short";
+export type SetupType = "trend-retest" | "trend-breakout" | "range-fade";
+export type Conviction = "high" | "medium" | "low";
+
+/** A conditional, with-trend trade plan keyed to a computed level. */
+export interface TradeIdea {
+  id: string;
+  direction: TradeDirection;
+  setupType: SetupType;
+  triggerLabel: string;
+  targetLabel: string;
+  entry: number; // planned entry (the trigger level)
+  target: number;
+  stop: number;
+  rr: number;
+  conviction: Conviction;
+  rationale: string;
+}
+
+/** A recommendation the trader took — watched to win/loss and logged to learn. */
+export interface Trade {
+  id: string;
+  takenAt: number;
+  direction: TradeDirection;
+  setupType: SetupType;
+  triggerLabel: string;
+  targetLabel: string;
+  entry: number;
+  target: number;
+  stop: number;
+  rr: number;
+  rationale: string;
+  status: "open" | "win" | "loss" | "closed";
+  resolvedAt?: number;
+  /** Realised R multiple: +rr on a win, −1 on a loss, 0 if scratched. */
+  resultR?: number;
+}
