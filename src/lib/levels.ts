@@ -1,8 +1,4 @@
-import { GoldLevels, PriceLevel } from "./types";
-
-// Daily candles for gold futures — enough history to read the prior session.
-const CHART_URL =
-  "https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=1d&range=3mo";
+import { GoldLevels, LevelTimeframe, PriceLevel } from "./types";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function num(v: any): number | null {
@@ -14,19 +10,46 @@ function round1(n: number): number {
   return Math.round(n * 10) / 10;
 }
 
+// A comparable key for "which session/hour is this candle in", in US Eastern.
+// Daily → YYYY-MM-DD; intraday → YYYY-MM-DD, HH. Lexicographic order matches
+// chronological order, so we can compare candles to "now".
+function periodKey(ms: number, intraday: boolean): string {
+  const d = new Date(ms);
+  if (intraday) {
+    return d.toLocaleString("en-CA", {
+      timeZone: "America/New_York",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      hour12: false,
+    });
+  }
+  return d.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+}
+
 /**
- * Key supply/demand levels for gold, computed with classic floor-trader pivot
- * points from the prior completed session. These are deterministic maths on
- * real OHLC data — never AI-guessed — so a trader can rely on the numbers.
+ * Key supply/demand levels for gold via classic floor-trader pivot points.
+ * These are deterministic maths on real OHLC — never AI-guessed.
  *
  *   Pivot P = (High + Low + Close) / 3
  *   R1 = 2P − Low     S1 = 2P − High
  *   R2 = P + (H − L)  S2 = P − (H − L)
  *   R3 = H + 2(P − L) S3 = L − 2(H − P)
+ *
+ * "daily" uses the prior completed session (swing/intraday levels).
+ * "intraday" uses the prior completed hour (tight levels for scalping).
  */
-export async function fetchGoldLevels(): Promise<GoldLevels | null> {
+export async function fetchGoldLevels(
+  timeframe: LevelTimeframe = "daily"
+): Promise<GoldLevels | null> {
+  const intraday = timeframe === "intraday";
+  const interval = intraday ? "60m" : "1d";
+  const range = intraday ? "5d" : "3mo";
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/GC=F?interval=${interval}&range=${range}`;
+
   try {
-    const res = await fetch(CHART_URL, {
+    const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0 (GoldPulse; levels)" },
       cache: "no-store",
       signal: AbortSignal.timeout(10_000),
@@ -45,34 +68,30 @@ export async function fetchGoldLevels(): Promise<GoldLevels | null> {
       const low = num(q.low?.[i]);
       const close = num(q.close?.[i]);
       if (high == null || low == null || close == null) continue;
-      candles.push({ t: ts[i], high, low, close });
+      candles.push({ t: ts[i] * 1000, high, low, close });
     }
     if (candles.length < 2) return null;
 
     const price = num(meta.regularMarketPrice) ?? candles[candles.length - 1].close;
-    const todayET = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-    const dayOf = (t: number) =>
-      new Date(t * 1000).toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    const nowKey = periodKey(Date.now(), intraday);
 
-    // Daily change vs the most recent completed session's close. (Yahoo's
-    // chartPreviousClose over a 3-month range is months old, so we can't use it.)
+    // Daily change vs the most recent completed session's close.
     let prevClose = candles[candles.length - 2].close;
     for (let i = candles.length - 1; i >= 0; i--) {
-      if (dayOf(candles[i].t) < todayET) {
+      if (periodKey(candles[i].t, intraday) < nowKey) {
         prevClose = candles[i].close;
         break;
       }
     }
     const change = price - prevClose;
 
-    // Pivots come from the most recent *completed* session with a real range —
-    // skip today's in-progress candle and any degenerate ones (holiday/thin
-    // days where the feed reports a near-zero range that collapses the levels).
-    const minRange = price * 0.002; // ~0.2%; filters out junk candles
+    // Pivot basis: most recent *completed* period with a real range (skip the
+    // in-progress period and any degenerate near-zero-range candles).
+    const minRange = price * (intraday ? 0.0004 : 0.002);
     let basis = candles[candles.length - 2];
     for (let i = candles.length - 1; i >= 0; i--) {
-      if (dayOf(candles[i].t) >= todayET) continue; // skip today / future stub
-      if (candles[i].high - candles[i].low < minRange) continue; // skip degenerate
+      if (periodKey(candles[i].t, intraday) >= nowKey) continue;
+      if (candles[i].high - candles[i].low < minRange) continue;
       basis = candles[i];
       break;
     }
@@ -93,7 +112,13 @@ export async function fetchGoldLevels(): Promise<GoldLevels | null> {
     ];
     const levels: PriceLevel[] = raw.map((l) => ({ ...l, price: round1(l.price) }));
 
+    // Recent closes for the mini chart; end on the live price.
+    const N = intraday ? 48 : 30;
+    const series = candles.slice(-N).map((c) => round1(c.close));
+    if (series.length > 0) series[series.length - 1] = round1(price);
+
     return {
+      timeframe,
       price: round1(price),
       change: round1(change),
       changePct: prevClose ? (change / prevClose) * 100 : 0,
@@ -101,8 +126,9 @@ export async function fetchGoldLevels(): Promise<GoldLevels | null> {
       dayLow: meta.regularMarketDayLow != null ? round1(Number(meta.regularMarketDayLow)) : null,
       yearHigh: num(meta.fiftyTwoWeekHigh),
       yearLow: num(meta.fiftyTwoWeekLow),
-      asOf: new Date(basis.t * 1000).toISOString(),
+      asOf: new Date(basis.t).toISOString(),
       levels,
+      series,
     };
   } catch {
     return null;

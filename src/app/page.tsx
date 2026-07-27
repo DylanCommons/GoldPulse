@@ -8,6 +8,7 @@ import type {
   ClassifiedItem,
   EventImpact,
   GoldLevels,
+  LevelTimeframe,
   NewsItem,
   PriceLevel,
   Quote,
@@ -18,6 +19,10 @@ const POLL_MS = 60_000;
 const CALENDAR_POLL_MS = 5 * 60_000;
 // Fire a desktop alert only for genuinely market-moving, directional headlines.
 const ALERT_IMPACT = 3;
+// Price-approach alerts: flag when price comes within NEAR of a level, and only
+// re-arm that level once price has backed off beyond CLEAR (hysteresis).
+const NEAR_PCT = 0.001; // 0.1%
+const CLEAR_PCT = 0.002; // 0.2%
 // Classify unseen headlines in small parallel batches so the UI colourises fast.
 const CLASSIFY_CHUNK = 20;
 const CLASS_CACHE_KEY = "gp_class_v1";
@@ -246,17 +251,31 @@ function fmtPrice(n: number): string {
   return n.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 }
 
+function near(price: number, levelPrice: number): boolean {
+  return price > 0 && Math.abs(levelPrice - price) / price <= NEAR_PCT;
+}
+
 function LevelRow({ level, current }: { level: PriceLevel; current: number }) {
   const above = level.price > current;
   const pct = current ? ((level.price - current) / current) * 100 : 0;
   const isPivot = level.kind === "pivot";
   const color = isPivot ? "text-stone-400" : above ? "text-rose-600" : "text-emerald-600";
   const dot = isPivot ? "bg-stone-300" : above ? "bg-rose-400" : "bg-emerald-400";
+  const isNear = near(current, level.price);
   return (
-    <div className="flex items-center justify-between px-3 py-1.5 text-sm">
+    <div
+      className={`flex items-center justify-between rounded-lg px-3 py-1.5 text-sm ${
+        isNear ? "bg-amber-50/70 ring-1 ring-amber-200" : ""
+      }`}
+    >
       <span className="flex items-center gap-2">
         <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
         <span className="w-12 font-medium text-stone-600">{level.label}</span>
+        {isNear && (
+          <span className="rounded-full bg-amber-100 px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+            near
+          </span>
+        )}
       </span>
       <span className="flex items-baseline gap-3">
         <span className="tabular-nums text-stone-800">${fmtPrice(level.price)}</span>
@@ -269,16 +288,108 @@ function LevelRow({ level, current }: { level: PriceLevel; current: number }) {
   );
 }
 
-function LevelsCard({ data }: { data: GoldLevels }) {
+// Inline SVG sparkline of recent price action with nearby pivot levels overlaid.
+function MiniChart({ series, levels, up }: { series: number[]; levels: PriceLevel[]; up: boolean }) {
+  if (series.length < 2) return null;
+  const W = 600;
+  const H = 120;
+  const lo = Math.min(...series);
+  const hi = Math.max(...series);
+  const pad = (hi - lo) * 0.12 || 1;
+  const min = lo - pad;
+  const max = hi + pad;
+  const x = (i: number) => (i / (series.length - 1)) * W;
+  const y = (v: number) => H - ((v - min) / (max - min)) * H;
+
+  const linePts = series.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const areaPath = `M0,${H} L ${linePts} L ${W},${H} Z`;
+  const stroke = up ? "#10b981" : "#f43f5e";
+  const gid = up ? "gp-up" : "gp-down";
+
+  // Only overlay levels that fall inside the visible price window.
+  const shown = levels
+    .filter((l) => l.price >= min && l.price <= max)
+    .map((l) => ({
+      ...l,
+      yPct: (y(l.price) / H) * 100,
+      color: l.kind === "pivot" ? "#a8a29e" : l.price > series[series.length - 1] ? "#fb7185" : "#34d399",
+    }));
+
+  return (
+    <div className="relative mt-3">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="block h-20 w-full">
+        <defs>
+          <linearGradient id={gid} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor={stroke} stopOpacity="0.18" />
+            <stop offset="100%" stopColor={stroke} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {shown.map((l, i) => (
+          <line
+            key={i}
+            x1="0"
+            x2={W}
+            y1={y(l.price)}
+            y2={y(l.price)}
+            stroke={l.color}
+            strokeWidth="1"
+            strokeDasharray="4 4"
+            vectorEffect="non-scaling-stroke"
+            opacity="0.6"
+          />
+        ))}
+        <path d={areaPath} fill={`url(#${gid})`} />
+        <polyline
+          points={linePts}
+          fill="none"
+          stroke={stroke}
+          strokeWidth="1.75"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+      {/* crisp HTML overlays so labels + dot aren't distorted by the stretch */}
+      {shown.map((l, i) => (
+        <span
+          key={i}
+          style={{ top: `${l.yPct}%` }}
+          className="pointer-events-none absolute right-1 -translate-y-1/2 rounded bg-white/80 px-1 text-[9px] font-medium tabular-nums text-stone-400"
+        >
+          {l.label}
+        </span>
+      ))}
+      <span
+        style={{ top: `${(y(series[series.length - 1]) / H) * 100}%` }}
+        className="pointer-events-none absolute right-0 h-2 w-2 -translate-y-1/2 translate-x-1/2 rounded-full ring-2 ring-white"
+        // color set inline to match the line
+      >
+        <span
+          className="block h-full w-full rounded-full"
+          style={{ backgroundColor: stroke }}
+        />
+      </span>
+    </div>
+  );
+}
+
+function LevelsCard({
+  data,
+  timeframe,
+  onTimeframe,
+}: {
+  data: GoldLevels;
+  timeframe: LevelTimeframe;
+  onTimeframe: (tf: LevelTimeframe) => void;
+}) {
   const up = data.change >= 0;
-  const asOf = new Date(data.asOf).toLocaleDateString("en-US", {
+  const asOf = new Date(data.asOf).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
+    ...(timeframe === "intraday" ? { hour: "numeric" } : {}),
     timeZone: "America/New_York",
   });
 
-  // Full ladder: the seven pivot levels plus a marker for the live price,
-  // sorted high → low so the current price sits in its true position.
   const rows: Array<{ type: "level"; level: PriceLevel } | { type: "current"; price: number }> = [
     ...data.levels.map((level) => ({ type: "level" as const, level })),
     { type: "current" as const, price: data.price },
@@ -311,11 +422,23 @@ function LevelsCard({ data }: { data: GoldLevels }) {
         </p>
       </div>
 
+      <MiniChart series={data.series} levels={data.levels} up={up} />
+
       <div className="mt-4 border-t border-stone-100 pt-3">
         <div className="flex items-center justify-between">
           <span className={EYEBROW}>Key Levels</span>
-          <span className="text-[11px] text-stone-400">pivots · {asOf} session</span>
+          <div className="flex items-center gap-1.5">
+            <Pill active={timeframe === "daily"} onClick={() => onTimeframe("daily")}>
+              Daily
+            </Pill>
+            <Pill active={timeframe === "intraday"} onClick={() => onTimeframe("intraday")}>
+              Intraday
+            </Pill>
+          </div>
         </div>
+        <p className="mt-1 text-[11px] text-stone-400">
+          {timeframe === "intraday" ? "hourly pivots" : "daily pivots"} · {asOf}
+        </p>
         <div className="mt-2 space-y-0.5">
           {rows.map((r, i) =>
             r.type === "current" ? (
@@ -520,6 +643,7 @@ export default function Home() {
   const [items, setItems] = useState<ClassifiedItem[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [levels, setLevels] = useState<GoldLevels | null>(null);
+  const [timeframe, setTimeframe] = useState<LevelTimeframe>("daily");
   const [calendar, setCalendar] = useState<{
     released: CalendarEvent[];
     todayUpcoming: CalendarEvent[];
@@ -537,6 +661,10 @@ export default function Home() {
   const seeded = useRef(false);
   const notifyQueue = useRef<Set<string>>(new Set());
   const alertsOnRef = useRef(false);
+  const timeframeRef = useRef<LevelTimeframe>("daily");
+  // Levels currently "armed" (already alerted) — cleared once price backs off,
+  // so we alert once per approach rather than every poll.
+  const armedLevels = useRef<Set<string>>(new Set());
 
   const decorate = useCallback(
     (news: NewsItem[]): ClassifiedItem[] =>
@@ -654,15 +782,60 @@ export default function Home() {
     }
   }, []);
 
-  const loadLevels = useCallback(async () => {
-    try {
-      const res = await fetch("/api/levels", { cache: "no-store" });
-      const data = await res.json();
-      if (data.levels) setLevels(data.levels);
-    } catch {
-      /* ignore */
+  // Fire a desktop alert the moment price comes within NEAR of a level; re-arm
+  // only after it backs off beyond CLEAR so we don't spam on every poll.
+  const checkLevelAlerts = useCallback((data: GoldLevels) => {
+    const price = data.price;
+    if (!price) return;
+    for (const lvl of data.levels) {
+      const key = `${data.timeframe}:${lvl.label}`;
+      const dist = Math.abs(lvl.price - price) / price;
+      if (dist <= NEAR_PCT) {
+        if (
+          !armedLevels.current.has(key) &&
+          alertsOnRef.current &&
+          typeof Notification !== "undefined" &&
+          Notification.permission === "granted"
+        ) {
+          const side = lvl.kind === "resistance" ? "resistance" : lvl.kind === "support" ? "support" : "pivot";
+          new Notification(`◆ Gold approaching ${lvl.label}`, {
+            body: `$${fmtPrice(price)} — within 0.1% of ${lvl.label} (${side}) at $${fmtPrice(lvl.price)}`,
+            tag: key,
+          });
+        }
+        armedLevels.current.add(key);
+      } else if (dist > CLEAR_PCT) {
+        armedLevels.current.delete(key);
+      }
     }
   }, []);
+
+  const loadLevels = useCallback(
+    async (tf?: LevelTimeframe) => {
+      const active = tf ?? timeframeRef.current;
+      try {
+        const res = await fetch(`/api/levels?tf=${active}`, { cache: "no-store" });
+        const data = await res.json();
+        if (data.levels) {
+          setLevels(data.levels);
+          checkLevelAlerts(data.levels);
+        }
+      } catch {
+        /* ignore */
+      }
+    },
+    [checkLevelAlerts]
+  );
+
+  const changeTimeframe = useCallback(
+    (tf: LevelTimeframe) => {
+      timeframeRef.current = tf;
+      armedLevels.current.clear(); // different level set — reset arming
+      setTimeframe(tf);
+      loadLevels(tf);
+    },
+    [loadLevels]
+  );
 
   const loadCalendar = useCallback(async () => {
     try {
@@ -826,7 +999,7 @@ export default function Home() {
 
         {levels && (
           <div className="mb-6">
-            <LevelsCard data={levels} />
+            <LevelsCard data={levels} timeframe={timeframe} onTimeframe={changeTimeframe} />
           </div>
         )}
 

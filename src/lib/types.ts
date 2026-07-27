@@ -84,7 +84,10 @@ export interface PriceLevel {
   kind: "resistance" | "support" | "pivot";
 }
 
+export type LevelTimeframe = "daily" | "intraday";
+
 export interface GoldLevels {
+  timeframe: LevelTimeframe;
   price: number;
   change: number;
   changePct: number;
@@ -92,8 +95,10 @@ export interface GoldLevels {
   dayLow: number | null;
   yearHigh: number | null;
   yearLow: number | null;
-  /** ISO date of the session the pivots were computed from. */
+  /** ISO timestamp of the session/hour the pivots were computed from. */
   asOf: string;
   /** Ordered high → low: resistance above the pivot, support below. */
   levels: PriceLevel[];
+  /** Recent closes (oldest → newest) for the mini price chart. */
+  series: number[];
 }
