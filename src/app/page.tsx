@@ -985,6 +985,53 @@ const CONVICTION_UI: Record<string, string> = {
   low: "text-amber-600",
 };
 
+// Persistent "trade live" strip for the sticky header when a position is open.
+function LiveTradeBar({ trades, price }: { trades: Trade[]; price: number }) {
+  const open = trades.filter((t) => t.status === "open");
+  if (open.length === 0) return null;
+  return (
+    <div className="border-t border-amber-200/70 bg-amber-50/80">
+      <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 px-5 py-2 text-xs">
+        <span className="flex items-center gap-1.5 font-semibold text-amber-700">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-amber-500" />
+          </span>
+          Trade live
+        </span>
+        {open.length === 1
+          ? (() => {
+              const t = open[0];
+              const dir = DIR_UI[t.direction];
+              const toTarget = t.direction === "long" ? t.target - price : price - t.target;
+              return (
+                <>
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-semibold ${dir.cls}`}
+                  >
+                    {dir.arrow} {dir.label}
+                  </span>
+                  <span className="tabular-nums text-stone-500">
+                    ${fmtPrice(t.entry)} → ${fmtPrice(t.target)}
+                  </span>
+                  <span className="tabular-nums text-stone-400">stop ${fmtPrice(t.stop)}</span>
+                  {price > 0 && (
+                    <span className="ml-auto tabular-nums text-stone-500">
+                      now ${fmtPrice(price)} ·{" "}
+                      {toTarget >= 0 ? `${fmtPrice(Math.abs(toTarget))} to target` : "past target"}
+                    </span>
+                  )}
+                </>
+              );
+            })()
+          : (
+            <span className="text-stone-600">{open.length} trades live — see Trades below</span>
+          )}
+      </div>
+    </div>
+  );
+}
+
 function IccStepper({ state }: { state: IccState | null }) {
   const steps = [
     { key: "indication", label: "Indication" },
@@ -1837,6 +1884,7 @@ export default function Home() {
             </button>
           </div>
         </div>
+        <LiveTradeBar trades={trades} price={levels?.price ?? 0} />
       </header>
 
       <main className="mx-auto max-w-3xl px-5 py-6 sm:py-8">
