@@ -141,9 +141,13 @@ export interface IccState {
   /** Stable key for this stage instance — used to alert once per transition. */
   signature: string;
   note: string;
+  /** The projected/armed continuation plan (entry = the break level). */
   trigger?: number;
-  correctionExtreme?: number;
+  stop?: number;
   target?: number;
+  targetLabel?: string;
+  rr?: number;
+  correctionExtreme?: number;
 }
 
 /** A recommendation the trader took — watched to win/loss and logged to learn. */

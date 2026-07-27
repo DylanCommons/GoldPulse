@@ -77,6 +77,27 @@ function writeBriefCache(brief: Brief) {
   }
 }
 
+const PULSE_CACHE_KEY = "gp_pulse_v1";
+const PULSE_TTL_MS = 20 * 60_000;
+
+function readPulseCache(): { pulse: string; at: number } | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return JSON.parse(localStorage.getItem(PULSE_CACHE_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+function writePulseCache(pulse: string) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(PULSE_CACHE_KEY, JSON.stringify({ pulse, at: Date.now() }));
+  } catch {
+    /* non-fatal */
+  }
+}
+
 const TRADES_KEY = "gp_trades_v1";
 
 function readTrades(): Trade[] {
@@ -553,33 +574,49 @@ function LevelsCard({
   );
 }
 
-function PriceStrip({ quotes, updatedAt }: { quotes: Quote[]; updatedAt: string | null }) {
+function PriceStrip({
+  quotes,
+  updatedAt,
+  pulse,
+}: {
+  quotes: Quote[];
+  updatedAt: string | null;
+  pulse?: string | null;
+}) {
   if (quotes.length === 0) return null;
   return (
-    <div className={`${CARD} flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3`}>
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
-        {quotes.map((q) => {
-          const up = q.change >= 0;
-          return (
-            <div key={q.symbol} className="flex items-baseline gap-1.5">
-              <span className="text-xs text-stone-400">{q.name}</span>
-              <span className="text-sm font-semibold tabular-nums text-stone-900">
-                {q.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-              </span>
-              <span
-                className={`text-xs font-medium tabular-nums ${up ? "text-emerald-600" : "text-rose-600"}`}
-              >
-                {up ? "▲" : "▼"} {Math.abs(q.changePct).toFixed(2)}%
-              </span>
-            </div>
-          );
-        })}
+    <div className={`${CARD} px-5 py-3`}>
+      <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
+          {quotes.map((q) => {
+            const up = q.change >= 0;
+            return (
+              <div key={q.symbol} className="flex items-baseline gap-1.5">
+                <span className="text-xs text-stone-400">{q.name}</span>
+                <span className="text-sm font-semibold tabular-nums text-stone-900">
+                  {q.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                </span>
+                <span
+                  className={`text-xs font-medium tabular-nums ${up ? "text-emerald-600" : "text-rose-600"}`}
+                >
+                  {up ? "▲" : "▼"} {Math.abs(q.changePct).toFixed(2)}%
+                </span>
+              </div>
+            );
+          })}
+        </div>
+        {updatedAt && (
+          <span className="flex items-center gap-1.5 text-[11px] text-stone-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+            Live · {timeAgo(updatedAt)}
+          </span>
+        )}
       </div>
-      {updatedAt && (
-        <span className="flex items-center gap-1.5 text-[11px] text-stone-400">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-          Live · {timeAgo(updatedAt)}
-        </span>
+      {pulse && (
+        <p className="mt-2.5 border-t border-stone-100 pt-2.5 text-xs leading-relaxed text-stone-500">
+          <span className="mr-1">💡</span>
+          {pulse}
+        </p>
       )}
     </div>
   );
@@ -980,6 +1017,30 @@ function IccStepper({ state }: { state: IccState | null }) {
         })}
       </div>
       {state?.note && <p className="mt-2 text-xs leading-relaxed text-stone-500">{state.note}</p>}
+
+      {state?.phase === "correction" && state.trigger != null && state.target != null && (
+        <div className="mt-2.5 rounded-lg border border-dashed border-stone-300 bg-white p-2.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-stone-400">
+            If the continuation plays out
+          </span>
+          <p className="mt-1 text-sm text-stone-700">
+            <span
+              className={
+                state.direction === "long" ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"
+              }
+            >
+              {state.direction === "long" ? "LONG" : "SHORT"}
+            </span>{" "}
+            on the break of{" "}
+            <span className="font-semibold tabular-nums">${fmtPrice(state.trigger)}</span> → target{" "}
+            <span className="font-semibold tabular-nums">${fmtPrice(state.target)}</span>
+            {state.targetLabel ? ` (${state.targetLabel})` : ""}, stop{" "}
+            <span className="tabular-nums">{state.stop != null ? `$${fmtPrice(state.stop)}` : "—"}</span>
+            {state.rr != null && <span className="font-medium text-stone-500"> · {state.rr}R</span>}
+          </p>
+          <p className="mt-1 text-[11px] text-stone-400">Pre-plan it now; only take it on the confirmed break.</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1256,6 +1317,7 @@ export default function Home() {
   const [brief, setBrief] = useState<Brief | null>(null);
   const [items, setItems] = useState<ClassifiedItem[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [pulse, setPulse] = useState<string | null>(null);
   const [levels, setLevels] = useState<GoldLevels | null>(null);
   const [timeframe, setTimeframe] = useState<LevelTimeframe>("daily");
   const [trades, setTrades] = useState<Trade[]>([]);
@@ -1428,6 +1490,26 @@ export default function Home() {
       } else if (dist > CLEAR_PCT) {
         armedLevels.current.delete(key);
       }
+    }
+  }, []);
+
+  const loadPulse = useCallback(async (force = false) => {
+    if (!force) {
+      const cached = readPulseCache();
+      if (cached && Date.now() - cached.at < PULSE_TTL_MS) {
+        setPulse(cached.pulse);
+        return;
+      }
+    }
+    try {
+      const res = await fetch("/api/pulse", { cache: "no-store" });
+      const data = await res.json();
+      if (data.pulse) {
+        setPulse(data.pulse);
+        writePulseCache(data.pulse);
+      }
+    } catch {
+      /* ignore */
     }
   }, []);
 
@@ -1656,6 +1738,7 @@ export default function Home() {
     loadPrice();
     loadLevels();
     loadSetups();
+    loadPulse();
     loadCalendar();
     if (!briefLoaded.current) {
       briefLoaded.current = true;
@@ -1665,6 +1748,7 @@ export default function Home() {
     const priceId = setInterval(loadPrice, POLL_MS);
     const levelsId = setInterval(loadLevels, POLL_MS);
     const setupsId = setInterval(loadSetups, POLL_MS);
+    const pulseId = setInterval(loadPulse, 5 * POLL_MS);
     const calId = setInterval(loadCalendar, CALENDAR_POLL_MS);
     return () => {
       clearInterval(clockId);
@@ -1672,9 +1756,10 @@ export default function Home() {
       clearInterval(priceId);
       clearInterval(levelsId);
       clearInterval(setupsId);
+      clearInterval(pulseId);
       clearInterval(calId);
     };
-  }, [loadFeed, loadBrief, loadPrice, loadLevels, loadSetups, loadCalendar]);
+  }, [loadFeed, loadBrief, loadPrice, loadLevels, loadSetups, loadPulse, loadCalendar]);
 
   const filtered = useMemo(() => {
     switch (filter) {
@@ -1742,6 +1827,7 @@ export default function Home() {
                 loadPrice();
                 loadLevels();
                 loadSetups();
+                loadPulse(true);
                 loadCalendar();
                 loadBrief(true);
               }}
@@ -1762,7 +1848,7 @@ export default function Home() {
 
         {quotes.length > 0 && (
           <div className="mb-4">
-            <PriceStrip quotes={quotes} updatedAt={updatedAt} />
+            <PriceStrip quotes={quotes} updatedAt={updatedAt} pulse={pulse} />
           </div>
         )}
 

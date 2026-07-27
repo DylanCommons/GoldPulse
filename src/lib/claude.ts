@@ -213,3 +213,49 @@ export async function generateBrief(
     return null;
   }
 }
+
+const PULSE_SYSTEM = `You explain the gold/dollar relationship to a trader who is still learning the
+macro. In ONE or TWO short, plain-English sentences, explain WHY the US dollar is moving the way it is
+right now and how that connects to gold's move. Name the real driver from the headlines (Fed / rate
+expectations, US data, Treasury yields, risk-off/geopolitics). Teach the mechanism simply — e.g. "a
+weaker dollar makes dollar-priced gold cheaper for other currencies, so demand rises". No jargon dumps,
+no preamble, no bullet points, no "today". Just the explanation, like a mentor in one breath.`;
+
+function pctPhrase(pct: number): string {
+  if (Math.abs(pct) < 0.03) return "roughly flat";
+  return `${pct >= 0 ? "up" : "down"} ${Math.abs(pct).toFixed(2)}%`;
+}
+
+/** One-line, teaching explanation of the current dollar move and its gold link. */
+export async function generatePulse(
+  items: NewsItem[],
+  goldPct: number,
+  dollarPct: number
+): Promise<string | null> {
+  const anthropic = client();
+  if (!anthropic) return null;
+  const list = items.slice(0, 20).map((it, i) => `${i + 1}. ${it.title}`).join("\n");
+  try {
+    const msg = await anthropic.messages.create({
+      model: CLASSIFY_MODEL,
+      max_tokens: 220,
+      system: PULSE_SYSTEM,
+      messages: [
+        {
+          role: "user",
+          content: `Right now gold is ${pctPhrase(goldPct)} and the US Dollar index (DXY) is ${pctPhrase(
+            dollarPct
+          )}.\nRecent headlines:\n${list}\n\nExplain the dollar move and the gold link in 1–2 sentences.`,
+        },
+      ],
+    });
+    const text = msg.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trim();
+    return text || null;
+  } catch {
+    return null;
+  }
+}

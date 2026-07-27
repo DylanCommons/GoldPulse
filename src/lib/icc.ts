@@ -1,5 +1,5 @@
 import { fetchGoldLevels } from "./levels";
-import { IccState, TradeIdea, Trend } from "./types";
+import { IccState, TradeDirection, TradeIdea, Trend } from "./types";
 
 interface Candle {
   t: number;
@@ -95,89 +95,108 @@ function detectSwings(c: Candle[], k = 2): Swing[] {
  * last swing low (sell) / swing high (buy); stop sits beyond the correction's
  * extreme; target is a prior swing low/high (real demand/supply) clearing 3R.
  */
-function buildIccSetups(sw: Swing[], trend: string, price: number, atr: number): TradeIdea[] {
-  if (sw.length < 4 || !price) return [];
+interface Geometry {
+  direction: TradeDirection;
+  entry: number;
+  stop: number;
+  target: number;
+  targetLabel: string;
+  rr: number;
+  corrExtreme: number;
+}
+
+// Pure structural geometry of the pending continuation (no price-position guard),
+// so it can be shown as a *projected* setup during the correction and as an
+// *armed* setup once price is in position.
+function setupGeometry(sw: Swing[], trend: string, price: number, atr: number): Geometry | null {
+  if (sw.length < 4 || !price) return null;
   const buf = Math.max(atr * 0.1, price * 0.0003);
-  const ideas: TradeIdea[] = [];
 
   if (trend === "bearish") {
-    // correction high = most recent swing high; entry trigger = the swing low before it.
     let hiIdx = -1;
     for (let i = sw.length - 1; i >= 0; i--) if (sw[i].type === "H") { hiIdx = i; break; }
-    if (hiIdx > 0) {
-      let loIdx = -1;
-      for (let i = hiIdx - 1; i >= 0; i--) if (sw[i].type === "L") { loIdx = i; break; }
-      if (loIdx >= 0) {
-        const corrHigh = sw[hiIdx];
-        const trig = sw[loIdx];
-        const stop = corrHigh.price + buf;
-        const risk = stop - trig.price;
-        // Valid pending continuation: price sits in the correction, not yet triggered/invalidated.
-        if (risk > 0 && price > trig.price && price < stop) {
-          const need = MIN_RR * risk;
-          const lows = sw.filter((s) => s.type === "L" && s.price < trig.price).sort((a, b) => b.price - a.price);
-          let target: number | null = null;
-          let tlabel = "";
-          for (const lo of lows) if (trig.price - lo.price >= need) { target = lo.price; tlabel = "prior demand"; break; }
-          if (target == null) { target = trig.price - need; tlabel = `${MIN_RR}R`; }
-          const rr = round1((trig.price - target) / risk);
-          if (rr >= MIN_RR) {
-            ideas.push({
-              id: `icc:short:${trig.i}`,
-              direction: "short",
-              setupType: "trend-retest",
-              triggerLabel: "continuation",
-              targetLabel: tlabel,
-              entry: round1(trig.price),
-              target: round1(target),
-              stop: round1(stop),
-              rr,
-              conviction: "medium",
-              rationale: `ICC sell — downtrend, price corrected up to ${round1(corrHigh.price)}. Short the break below the last swing low ${round1(trig.price)}; stop above the correction high ${round1(corrHigh.price)}; target prior demand at ${round1(target)}.`,
-            });
-          }
-        }
-      }
-    }
-  } else if (trend === "bullish") {
+    if (hiIdx <= 0) return null;
+    let loIdx = -1;
+    for (let i = hiIdx - 1; i >= 0; i--) if (sw[i].type === "L") { loIdx = i; break; }
+    if (loIdx < 0) return null;
+    const corrHigh = sw[hiIdx];
+    const trig = sw[loIdx];
+    const stop = corrHigh.price + buf;
+    const risk = stop - trig.price;
+    if (risk <= 0) return null;
+    const need = MIN_RR * risk;
+    const lows = sw.filter((s) => s.type === "L" && s.price < trig.price).sort((a, b) => b.price - a.price);
+    let target: number | null = null;
+    let tlabel = "";
+    for (const lo of lows) if (trig.price - lo.price >= need) { target = lo.price; tlabel = "prior demand"; break; }
+    if (target == null) { target = trig.price - need; tlabel = `${MIN_RR}R`; }
+    return {
+      direction: "short",
+      entry: round1(trig.price),
+      stop: round1(stop),
+      target: round1(target),
+      targetLabel: tlabel,
+      rr: round1((trig.price - target) / risk),
+      corrExtreme: round1(corrHigh.price),
+    };
+  }
+
+  if (trend === "bullish") {
     let loIdx = -1;
     for (let i = sw.length - 1; i >= 0; i--) if (sw[i].type === "L") { loIdx = i; break; }
-    if (loIdx > 0) {
-      let hiIdx = -1;
-      for (let i = loIdx - 1; i >= 0; i--) if (sw[i].type === "H") { hiIdx = i; break; }
-      if (hiIdx >= 0) {
-        const corrLow = sw[loIdx];
-        const trig = sw[hiIdx];
-        const stop = corrLow.price - buf;
-        const risk = trig.price - stop;
-        if (risk > 0 && price < trig.price && price > stop) {
-          const need = MIN_RR * risk;
-          const highs = sw.filter((s) => s.type === "H" && s.price > trig.price).sort((a, b) => a.price - b.price);
-          let target: number | null = null;
-          let tlabel = "";
-          for (const h of highs) if (h.price - trig.price >= need) { target = h.price; tlabel = "prior supply"; break; }
-          if (target == null) { target = trig.price + need; tlabel = `${MIN_RR}R`; }
-          const rr = round1((target - trig.price) / risk);
-          if (rr >= MIN_RR) {
-            ideas.push({
-              id: `icc:long:${trig.i}`,
-              direction: "long",
-              setupType: "trend-retest",
-              triggerLabel: "continuation",
-              targetLabel: tlabel,
-              entry: round1(trig.price),
-              target: round1(target),
-              stop: round1(stop),
-              rr,
-              conviction: "medium",
-              rationale: `ICC buy — uptrend, price corrected down to ${round1(corrLow.price)}. Long the break above the last swing high ${round1(trig.price)}; stop below the correction low ${round1(corrLow.price)}; target prior supply at ${round1(target)}.`,
-            });
-          }
-        }
-      }
-    }
+    if (loIdx <= 0) return null;
+    let hiIdx = -1;
+    for (let i = loIdx - 1; i >= 0; i--) if (sw[i].type === "H") { hiIdx = i; break; }
+    if (hiIdx < 0) return null;
+    const corrLow = sw[loIdx];
+    const trig = sw[hiIdx];
+    const stop = corrLow.price - buf;
+    const risk = trig.price - stop;
+    if (risk <= 0) return null;
+    const need = MIN_RR * risk;
+    const highs = sw.filter((s) => s.type === "H" && s.price > trig.price).sort((a, b) => a.price - b.price);
+    let target: number | null = null;
+    let tlabel = "";
+    for (const h of highs) if (h.price - trig.price >= need) { target = h.price; tlabel = "prior supply"; break; }
+    if (target == null) { target = trig.price + need; tlabel = `${MIN_RR}R`; }
+    return {
+      direction: "long",
+      entry: round1(trig.price),
+      stop: round1(stop),
+      target: round1(target),
+      targetLabel: tlabel,
+      rr: round1((target - trig.price) / risk),
+      corrExtreme: round1(corrLow.price),
+    };
   }
-  return ideas.slice(0, 2);
+  return null;
+}
+
+function buildIccSetups(sw: Swing[], trend: string, price: number, atr: number): TradeIdea[] {
+  const g = setupGeometry(sw, trend, price, atr);
+  if (!g || g.rr < MIN_RR) return [];
+  // Armed only when price sits inside the correction (not yet triggered/invalidated).
+  const armed = g.direction === "short" ? price > g.entry && price < g.stop : price < g.entry && price > g.stop;
+  if (!armed) return [];
+  const rationale =
+    g.direction === "short"
+      ? `ICC sell — downtrend, price corrected up to ${g.corrExtreme}. Short the break below the last swing low ${g.entry}; stop above the correction high ${g.corrExtreme}; target ${g.targetLabel} at ${g.target}.`
+      : `ICC buy — uptrend, price corrected down to ${g.corrExtreme}. Long the break above the last swing high ${g.entry}; stop below the correction low ${g.corrExtreme}; target ${g.targetLabel} at ${g.target}.`;
+  return [
+    {
+      id: `icc:${g.direction}:${g.entry}:${g.stop}`,
+      direction: g.direction,
+      setupType: "trend-retest",
+      triggerLabel: "continuation",
+      targetLabel: g.targetLabel,
+      entry: g.entry,
+      target: g.target,
+      stop: g.stop,
+      rr: g.rr,
+      conviction: "medium",
+      rationale,
+    },
+  ];
 }
 
 /**
@@ -185,7 +204,13 @@ function buildIccSetups(sw: Swing[], trend: string, price: number, atr: number):
  * it develops: indication (fresh impulse extreme) → correction (pullback formed)
  * → setup (continuation armed). Signature changes on each transition for dedup.
  */
-function computeIccState(sw: Swing[], trend: Trend, price: number, setups: TradeIdea[]): IccState {
+function computeIccState(
+  sw: Swing[],
+  trend: Trend,
+  price: number,
+  setups: TradeIdea[],
+  geo: Geometry | null
+): IccState {
   if (trend !== "bearish" && trend !== "bullish") {
     return {
       phase: "none",
@@ -216,13 +241,20 @@ function computeIccState(sw: Swing[], trend: Trend, price: number, setups: Trade
     const lastH = Hs[Hs.length - 1];
     const freshLL = lastL && prevL && lastL.price < prevL.price;
     if (freshLL && lastH && lastH.i > lastL.i) {
+      const p = geo && geo.direction === "short" ? geo : null;
+      const proj = p ? ` If it plays out: short the break of ${p.entry} → ${p.target} (${p.rr}R), stop ${p.stop}.` : "";
       return {
         phase: "correction",
         trend,
         direction: "short",
         signature: `cor:bear:${lastH.i}`,
-        note: `Correction underway — price pulled up to ${round1(lastH.price)} after a lower low. Watch for the continuation setup.`,
+        note: `Correction underway — price pulled up to ${round1(lastH.price)} after a lower low.${proj}`,
         correctionExtreme: round1(lastH.price),
+        trigger: p?.entry,
+        stop: p?.stop,
+        target: p?.target,
+        targetLabel: p?.targetLabel,
+        rr: p?.rr,
       };
     }
     if (freshLL) {
@@ -242,13 +274,20 @@ function computeIccState(sw: Swing[], trend: Trend, price: number, setups: Trade
   const lastL = Ls[Ls.length - 1];
   const freshHH = lastH && prevH && lastH.price > prevH.price;
   if (freshHH && lastL && lastL.i > lastH.i) {
+    const p = geo && geo.direction === "long" ? geo : null;
+    const proj = p ? ` If it plays out: long the break of ${p.entry} → ${p.target} (${p.rr}R), stop ${p.stop}.` : "";
     return {
       phase: "correction",
       trend,
       direction: "long",
       signature: `cor:bull:${lastL.i}`,
-      note: `Correction underway — price pulled down to ${round1(lastL.price)} after a higher high. Watch for the continuation setup.`,
+      note: `Correction underway — price pulled down to ${round1(lastL.price)} after a higher high.${proj}`,
       correctionExtreme: round1(lastL.price),
+      trigger: p?.entry,
+      stop: p?.stop,
+      target: p?.target,
+      targetLabel: p?.targetLabel,
+      rr: p?.rr,
     };
   }
   if (freshHH) {
@@ -270,7 +309,8 @@ export async function fetchIccSetups(): Promise<{ setups: TradeIdea[]; state: Ic
   }
   const atr = atr15(c15) ?? levels.price * 0.002;
   const sw = detectSwings(c15, 2);
+  const geo = setupGeometry(sw, levels.trend, levels.price, atr);
   const setups = buildIccSetups(sw, levels.trend, levels.price, atr);
-  const state = computeIccState(sw, levels.trend, levels.price, setups);
+  const state = computeIccState(sw, levels.trend, levels.price, setups, geo);
   return { setups, state };
 }
