@@ -985,6 +985,50 @@ const CONVICTION_UI: Record<string, string> = {
   low: "text-amber-600",
 };
 
+// Big, unmissable day-trend banner (daily 50/200 EMA bias).
+function TrendBanner({ trend }: { trend: Trend }) {
+  const map = {
+    bullish: {
+      label: "BULLISH",
+      arrow: "▲",
+      card: "border-emerald-200 bg-emerald-50",
+      text: "text-emerald-700",
+      hint: "Favour with-trend longs — buy dips into support.",
+    },
+    bearish: {
+      label: "BEARISH",
+      arrow: "▼",
+      card: "border-rose-200 bg-rose-50",
+      text: "text-rose-700",
+      hint: "Favour with-trend shorts — sell rallies into resistance.",
+    },
+    mixed: {
+      label: "NEUTRAL",
+      arrow: "↔",
+      card: "border-amber-200 bg-amber-50",
+      text: "text-amber-700",
+      hint: "No clear trend — be selective or stand aside.",
+    },
+  } as const;
+  const ui = map[trend];
+  return (
+    <section className={`rounded-2xl border ${ui.card} px-5 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.04)]`}>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
+        <div className="flex items-center gap-3">
+          <span className={`text-3xl leading-none ${ui.text}`}>{ui.arrow}</span>
+          <div className="leading-tight">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-stone-400">
+              Today&rsquo;s Trend
+            </span>
+            <div className={`text-2xl font-extrabold tracking-tight ${ui.text}`}>{ui.label}</div>
+          </div>
+        </div>
+        <span className="text-xs text-stone-500 sm:text-sm">{ui.hint}</span>
+      </div>
+    </section>
+  );
+}
+
 // Persistent "trade live" strip for the sticky header when a position is open.
 function LiveTradeBar({ trades, price }: { trades: Trade[]; price: number }) {
   const open = trades.filter((t) => t.status === "open");
@@ -1888,6 +1932,12 @@ export default function Home() {
       </header>
 
       <main className="mx-auto max-w-3xl px-5 py-6 sm:py-8">
+        {levels && (
+          <div className="mb-4">
+            <TrendBanner trend={levels.trend} />
+          </div>
+        )}
+
         {now != null && (
           <div className="mb-4">
             <SessionPanel now={now} upcoming={calendar.todayUpcoming} />
