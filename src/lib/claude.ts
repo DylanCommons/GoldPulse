@@ -115,10 +115,17 @@ export async function classifyHeadlines(
   return out;
 }
 
-const BRIEF_SYSTEM = `You are the morning strategist for a gold (XAU/USD) day trader.
-From the supplied recent headlines, write a tight pre-session brief on what is driving gold
-and the near-term directional bias. Be concrete and honest about uncertainty — this is
-decision support, not a signal to trade blindly.
+const BRIEF_SYSTEM = `You are the morning strategist for Dylan, a gold (XAU/USD) day trader based in
+Ireland who trades the ICC method (Indication → Correction → Continuation): he only enters WITH the
+higher-timeframe trend, on a confirmed continuation, and he avoids counter-trend trades in choppy
+conditions and around high-impact data releases. Write a tight pre-session brief on what is driving
+gold and the near-term directional bias. Be concrete and honest about uncertainty — this is decision
+support for a disciplined with-trend trader, not a signal to trade blindly.
+
+Frame it for his workflow: (1) note whether today looks like a CLEAN trading day or an EVENT day to
+sit out around the release; (2) state the higher-timeframe lean so he can judge with-trend vs counter-
+trend; (3) respect the current "good-news-is-bad-for-gold" regime (strong US data/oil/inflation →
+hawkish-Fed fears → gold down). Express any times in Irish time (IST).
 
 Return ONLY a JSON object:
 {
@@ -133,11 +140,12 @@ Return ONLY a JSON object:
 Give 3-5 drivers and 3-6 watchlist items. No text outside the JSON.`;
 
 function formatEventLine(e: CalendarEvent): string {
-  const t = new Date(e.date).toLocaleString("en-US", {
+  const t = new Date(e.date).toLocaleString("en-GB", {
     weekday: "short",
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
-    timeZone: "America/New_York",
+    hour12: false,
+    timeZone: "Europe/Dublin",
   });
   const nums = [
     e.actual != null ? `actual ${e.actual}` : null,
@@ -146,7 +154,7 @@ function formatEventLine(e: CalendarEvent): string {
   ]
     .filter(Boolean)
     .join(", ");
-  return `${t} ET · ${e.country} · ${e.title} [${e.impact}]${nums ? ` (${nums})` : ""}`;
+  return `${t} IST · ${e.country} · ${e.title} [${e.impact}]${nums ? ` (${nums})` : ""}`;
 }
 
 export async function generateBrief(
@@ -163,7 +171,7 @@ export async function generateBrief(
 
   const calendarBlock =
     events.length > 0
-      ? `\n\nScheduled economic events this week (times ET). Use these for the "watch today" list and to flag catalysts BEFORE they hit:\n${events
+      ? `\n\nScheduled economic events this week (times IST, Irish). Use these for the "watch today" list and to flag catalysts BEFORE they hit:\n${events
           .map(formatEventLine)
           .join("\n")}`
       : "";

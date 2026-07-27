@@ -86,6 +86,8 @@ export interface PriceLevel {
 
 export type LevelTimeframe = "daily" | "intraday";
 
+export type Trend = "bullish" | "bearish" | "mixed";
+
 export interface GoldLevels {
   timeframe: LevelTimeframe;
   price: number;
@@ -101,4 +103,11 @@ export interface GoldLevels {
   levels: PriceLevel[];
   /** Recent closes (oldest → newest) for the mini price chart. */
   series: number[];
+  /** Daily 50/200 EMA bias (for trading with the higher-timeframe trend). */
+  ema50: number | null;
+  ema200: number | null;
+  /** Daily ATR(14) — for ATR-based stop sizing. */
+  atr14: number | null;
+  /** Trend read from price vs the EMAs. */
+  trend: Trend;
 }

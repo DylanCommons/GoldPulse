@@ -13,6 +13,7 @@ import type {
   PriceLevel,
   Quote,
   Stance,
+  Trend,
 } from "@/lib/types";
 
 const POLL_MS = 60_000;
@@ -383,12 +384,19 @@ function LevelsCard({
   onTimeframe: (tf: LevelTimeframe) => void;
 }) {
   const up = data.change >= 0;
-  const asOf = new Date(data.asOf).toLocaleString("en-US", {
+  const asOf = new Date(data.asOf).toLocaleString("en-GB", {
     month: "short",
     day: "numeric",
-    ...(timeframe === "intraday" ? { hour: "numeric" } : {}),
-    timeZone: "America/New_York",
+    ...(timeframe === "intraday" ? { hour: "2-digit", minute: "2-digit", hour12: false } : {}),
+    timeZone: "Europe/Dublin",
   });
+
+  const trendUI: Record<Trend, { label: string; cls: string }> = {
+    bullish: { label: "Uptrend", cls: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+    bearish: { label: "Downtrend", cls: "border-rose-200 bg-rose-50 text-rose-700" },
+    mixed: { label: "Ranging", cls: "border-stone-200 bg-stone-50 text-stone-600" },
+  };
+  const tr = trendUI[data.trend];
 
   const rows: Array<{ type: "level"; level: PriceLevel } | { type: "current"; price: number }> = [
     ...data.levels.map((level) => ({ type: "level" as const, level })),
@@ -420,6 +428,30 @@ function LevelsCard({
             <> · 52w {fmtPrice(data.yearLow)}–{fmtPrice(data.yearHigh)}</>
           )}
         </p>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-medium ${tr.cls}`}
+          title="Daily 50/200 EMA trend — trade with this"
+        >
+          Trend: {tr.label}
+        </span>
+        {data.ema50 != null && (
+          <span className="text-stone-400">
+            50 EMA <span className="tabular-nums text-stone-600">{fmtPrice(data.ema50)}</span>
+          </span>
+        )}
+        {data.ema200 != null && (
+          <span className="text-stone-400">
+            200 EMA <span className="tabular-nums text-stone-600">{fmtPrice(data.ema200)}</span>
+          </span>
+        )}
+        {data.atr14 != null && (
+          <span className="text-stone-400" title="Daily ATR(14) — stop-sizing reference">
+            ATR <span className="tabular-nums text-stone-600">{fmtPrice(data.atr14)}</span>
+          </span>
+        )}
       </div>
 
       <MiniChart series={data.series} levels={data.levels} up={up} />
@@ -508,17 +540,18 @@ const IMPACT_UI: Record<EventImpact, { dot: string }> = {
 };
 
 function eventTime(iso: string): string {
-  return new Date(iso).toLocaleTimeString("en-US", {
-    hour: "numeric",
+  return new Date(iso).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
     minute: "2-digit",
-    timeZone: "America/New_York",
+    hour12: false,
+    timeZone: "Europe/Dublin",
   });
 }
 
 function eventDay(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", {
     weekday: "short",
-    timeZone: "America/New_York",
+    timeZone: "Europe/Dublin",
   });
 }
 
@@ -536,7 +569,7 @@ function EventRow({ e, showDay }: { e: CalendarEvent; showDay?: boolean }) {
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${ui.dot}`} />
       <span className="w-24 shrink-0 tabular-nums text-stone-400">
         {showDay ? `${eventDay(e.date)} ` : ""}
-        {eventTime(e.date)} ET
+        {eventTime(e.date)} IST
       </span>
       <span className="w-9 shrink-0 font-medium text-stone-400">{e.country}</span>
       <span className="min-w-0 flex-1 truncate text-stone-700">{e.title}</span>
@@ -623,7 +656,7 @@ function CalendarPanel({
         </div>
       )}
       <p className="mt-3 border-t border-stone-100 pt-3 text-[11px] text-stone-400">
-        High-impact + USD events · times US Eastern · via ForexFactory
+        High-impact + USD events · times Irish (IST) · via ForexFactory
       </p>
     </section>
   );
@@ -635,6 +668,215 @@ function SkeletonRow() {
       <div className="h-4 w-3/4 animate-pulse rounded bg-stone-100" />
       <div className="mt-2 h-3 w-1/4 animate-pulse rounded bg-stone-100" />
     </div>
+  );
+}
+
+// ————— Session / timing (Dylan's Irish-time trading windows) —————
+function irishParts(ts: number) {
+  const d = new Date(ts);
+  const hm = d.toLocaleTimeString("en-GB", {
+    timeZone: "Europe/Dublin",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const [h, m] = hm.split(":").map(Number);
+  const weekday = d.toLocaleDateString("en-US", { timeZone: "Europe/Dublin", weekday: "short" });
+  return { minutes: h * 60 + m, hm, weekday };
+}
+
+type SessionState = "prime" | "caution" | "off";
+
+// Windows in IST minutes: London 09:00–11:00 (540–660), NY overlap 15:00–16:30
+// (900–990); spike windows around 13:30 and 14:30 US prints.
+function sessionInfo(minutes: number): { state: SessionState; label: string } {
+  for (const [a, b] of [
+    [805, 820],
+    [865, 880],
+  ]) {
+    if (minutes >= a && minutes < b) return { state: "caution", label: "US data-spike window — wait for the dust to settle" };
+  }
+  if (minutes >= 540 && minutes < 660) return { state: "prime", label: "London session — prime (first trend leg)" };
+  if (minutes >= 900 && minutes < 990) return { state: "prime", label: "NY overlap — prime (deepest liquidity)" };
+  return { state: "off", label: "Outside your prime windows" };
+}
+
+function minsToNextPrime(minutes: number): { mins: number; name: string } {
+  if (minutes < 540) return { mins: 540 - minutes, name: "London" };
+  if (minutes < 900) return { mins: 900 - minutes, name: "NY overlap" };
+  return { mins: 540 + (1440 - minutes), name: "London" };
+}
+
+function fmtDur(mins: number): string {
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function SessionPanel({ now, upcoming }: { now: number; upcoming: CalendarEvent[] }) {
+  const { minutes, hm, weekday } = irishParts(now);
+  const sess = sessionInfo(minutes);
+  const next = minsToNextPrime(minutes);
+
+  const stateUI: Record<SessionState, { dot: string; chip: string }> = {
+    prime: { dot: "bg-emerald-500", chip: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+    caution: { dot: "bg-amber-500", chip: "border-amber-200 bg-amber-50 text-amber-700" },
+    off: { dot: "bg-stone-300", chip: "border-stone-200 bg-stone-50 text-stone-500" },
+  };
+  const ui = stateUI[sess.state];
+  const dayNote = ["Tue", "Wed", "Thu"].includes(weekday)
+    ? "prime day"
+    : weekday === "Mon"
+      ? "slow start"
+      : weekday === "Fri"
+        ? "thin afternoon"
+        : "weekend";
+
+  const highs = upcoming.filter((e) => e.impact === "high");
+  const nextHigh = highs[0] ?? null;
+  const nextHighMins = nextHigh ? Math.round((Date.parse(nextHigh.date) - now) / 60000) : null;
+  const releaseImminent = nextHighMins != null && nextHighMins <= 30 && nextHighMins >= -10;
+
+  return (
+    <section className={`${CARD} p-4`}>
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="flex items-baseline gap-2.5">
+          <span className="text-2xl font-semibold tabular-nums tracking-tight text-stone-900">{hm}</span>
+          <span className="text-xs text-stone-400">
+            {weekday} · {dayNote} · Irish time
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${ui.chip}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${ui.dot}`} />
+            {sess.state === "prime" ? "Prime window" : sess.state === "caution" ? "Caution" : "Off-window"}
+          </span>
+          {sess.state === "off" && (
+            <span className="text-xs text-stone-400">{next.name} in {fmtDur(next.mins)}</span>
+          )}
+        </div>
+      </div>
+      <p className="mt-1.5 text-xs text-stone-500">{sess.label}</p>
+
+      <div className="mt-3 border-t border-stone-100 pt-2.5 text-xs">
+        {nextHigh ? (
+          <span
+            className={`inline-flex items-center gap-1.5 font-medium ${releaseImminent ? "text-rose-700" : "text-amber-700"}`}
+          >
+            <span>{releaseImminent ? "⛔" : "⚠️"}</span>
+            Event day: {nextHigh.country} {nextHigh.title} at {eventTime(nextHigh.date)} IST
+            {nextHighMins != null && nextHighMins >= 0 && <span className="text-stone-400"> · in {fmtDur(nextHighMins)}</span>}
+            {releaseImminent && <span className="text-rose-600"> — sit out the release</span>}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700">
+            <span>✓</span> Clean day — no high-impact events left. News-check passed.
+          </span>
+        )}
+      </div>
+    </section>
+  );
+}
+
+// ————— Pre-trade discipline checklist (Dylan's hard rules) —————
+const CHECKLIST_ITEMS = [
+  "With the higher-timeframe trend (D / 4H / 1H bias)",
+  "Confirmed ICC continuation — broke last minor HL/LH (not mid-correction)",
+  "Stop placed — and I will NOT move it",
+  "Target set into a pre-identified level",
+  "Good window (London 09–11 / NY 15–16:30), not chop or a data spike",
+  "Planned & carded — not an impulse phone trade",
+  "Risk size deliberate — not scaled up on a streak",
+];
+
+function irishDateKey(ts: number): string {
+  return new Date(ts).toLocaleDateString("en-CA", { timeZone: "Europe/Dublin" });
+}
+
+function ChecklistCard({ now }: { now: number }) {
+  const storageKey = `gp_checklist_${irishDateKey(now)}`;
+  const [checks, setChecks] = useState<boolean[]>(() => CHECKLIST_ITEMS.map(() => false));
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      setChecks(raw ? JSON.parse(raw) : CHECKLIST_ITEMS.map(() => false));
+    } catch {
+      setChecks(CHECKLIST_ITEMS.map(() => false));
+    }
+  }, [storageKey]);
+
+  const toggle = (i: number) => {
+    setChecks((prev) => {
+      const next = prev.map((v, j) => (j === i ? !v : v));
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(next));
+      } catch {
+        /* non-fatal */
+      }
+      return next;
+    });
+  };
+
+  const reset = () => {
+    const cleared = CHECKLIST_ITEMS.map(() => false);
+    setChecks(cleared);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(cleared));
+    } catch {
+      /* non-fatal */
+    }
+  };
+
+  const done = checks.filter(Boolean).length;
+  const all = done === CHECKLIST_ITEMS.length;
+
+  return (
+    <section className={`${CARD} p-5`}>
+      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between">
+        <span className={EYEBROW}>Pre-trade checklist</span>
+        <span className="flex items-center gap-2">
+          <span
+            className={`rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+              all ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-stone-200 bg-stone-50 text-stone-500"
+            }`}
+          >
+            {all ? "✓ Cleared to trade" : `${done}/${CHECKLIST_ITEMS.length}`}
+          </span>
+          <span className="text-stone-400">{open ? "▲" : "▼"}</span>
+        </span>
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-1.5">
+          {CHECKLIST_ITEMS.map((item, i) => (
+            <button
+              key={i}
+              onClick={() => toggle(i)}
+              className="flex w-full items-start gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm transition hover:bg-stone-50"
+            >
+              <span
+                className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${
+                  checks[i]
+                    ? "border-emerald-500 bg-emerald-500 text-white"
+                    : "border-stone-300 bg-white text-transparent"
+                }`}
+              >
+                ✓
+              </span>
+              <span className={checks[i] ? "text-stone-400 line-through" : "text-stone-700"}>{item}</span>
+            </button>
+          ))}
+          <div className="flex items-center justify-between pt-1">
+            <p className="text-[11px] text-stone-400">Resets daily · &ldquo;If it&rsquo;s not worth logging, it&rsquo;s not worth taking.&rdquo;</p>
+            <button onClick={reset} className="text-[11px] text-stone-400 underline hover:text-stone-600">
+              reset
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -654,6 +896,8 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
   const [alertsOn, setAlertsOn] = useState(false);
+  // Set on mount (not during SSR) to avoid a hydration mismatch on time.
+  const [now, setNow] = useState<number | null>(null);
 
   const briefLoaded = useRef(false);
   const classCache = useRef<ClassMap>({});
@@ -894,6 +1138,9 @@ export default function Home() {
     const cachedBrief = readBriefCache();
     if (cachedBrief) setBrief(cachedBrief.brief);
 
+    setNow(Date.now());
+    const clockId = setInterval(() => setNow(Date.now()), 15_000);
+
     loadFeed();
     loadPrice();
     loadLevels();
@@ -907,6 +1154,7 @@ export default function Home() {
     const levelsId = setInterval(loadLevels, POLL_MS);
     const calId = setInterval(loadCalendar, CALENDAR_POLL_MS);
     return () => {
+      clearInterval(clockId);
       clearInterval(feedId);
       clearInterval(priceId);
       clearInterval(levelsId);
@@ -991,6 +1239,12 @@ export default function Home() {
       </header>
 
       <main className="mx-auto max-w-3xl px-5 py-6 sm:py-8">
+        {now != null && (
+          <div className="mb-4">
+            <SessionPanel now={now} upcoming={calendar.todayUpcoming} />
+          </div>
+        )}
+
         {quotes.length > 0 && (
           <div className="mb-4">
             <PriceStrip quotes={quotes} updatedAt={updatedAt} />
@@ -998,8 +1252,14 @@ export default function Home() {
         )}
 
         {levels && (
-          <div className="mb-6">
+          <div className="mb-4">
             <LevelsCard data={levels} timeframe={timeframe} onTimeframe={changeTimeframe} />
+          </div>
+        )}
+
+        {now != null && (
+          <div className="mb-6">
+            <ChecklistCard now={now} />
           </div>
         )}
 
