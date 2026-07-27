@@ -214,12 +214,15 @@ export async function generateBrief(
   }
 }
 
-const PULSE_SYSTEM = `You explain the gold/dollar relationship to a trader who is still learning the
-macro. In ONE or TWO short, plain-English sentences, explain WHY the US dollar is moving the way it is
-right now and how that connects to gold's move. Name the real driver from the headlines (Fed / rate
-expectations, US data, Treasury yields, risk-off/geopolitics). Teach the mechanism simply — e.g. "a
-weaker dollar makes dollar-priced gold cheaper for other currencies, so demand rises". No jargon dumps,
-no preamble, no bullet points, no "today". Just the explanation, like a mentor in one breath.`;
+const PULSE_SYSTEM = `Explain why gold and the US dollar are moving to a COMPLETE BEGINNER — a smart friend
+who has never traded and knows no finance. Hard rules:
+- 1 to 2 SHORT sentences. Simple everyday words only.
+- NO jargon. Do NOT use: "yields", "Treasury", "opportunity cost", "non-yielding", "basis points",
+  "real rates", "safe-haven", "hawkish/dovish", "risk-on/off". If you'd normally use one, translate it:
+  e.g. instead of "yields fell" say "the interest paid on safe savings dropped".
+- Give the plain cause → effect, like: "Weak US jobs numbers make people think interest rates will
+  come down, and gold usually goes up when rates fall — so gold is rising."
+- No preamble, no "today", no bullet points. Just the simple explanation in one breath.`;
 
 function pctPhrase(pct: number): string {
   if (Math.abs(pct) < 0.03) return "roughly flat";

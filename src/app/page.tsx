@@ -77,7 +77,7 @@ function writeBriefCache(brief: Brief) {
   }
 }
 
-const PULSE_CACHE_KEY = "gp_pulse_v1";
+const PULSE_CACHE_KEY = "gp_pulse_v2";
 const PULSE_TTL_MS = 20 * 60_000;
 
 function readPulseCache(): { pulse: string; at: number } | null {
