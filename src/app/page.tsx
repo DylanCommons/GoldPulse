@@ -67,30 +67,36 @@ function writeBriefCache(brief: Brief) {
 
 type Filter = "all" | "bullish" | "bearish" | "high-impact";
 
+// Reusable card surface — white, hairline border, whisper of a shadow.
+const CARD =
+  "rounded-2xl border border-stone-200/80 bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04)]";
+const EYEBROW =
+  "text-[11px] font-semibold uppercase tracking-wider text-stone-400";
+
 const STANCE_UI: Record<
   Stance,
-  { label: string; dot: string; text: string; ring: string; bg: string }
+  { label: string; dot: string; text: string; pill: string; accent: string }
 > = {
   bullish: {
     label: "Bullish",
-    dot: "bg-emerald-400",
-    text: "text-emerald-300",
-    ring: "ring-emerald-500/30",
-    bg: "bg-emerald-500/5",
+    dot: "bg-emerald-500",
+    text: "text-emerald-700",
+    pill: "border-emerald-200 bg-emerald-50",
+    accent: "border-l-emerald-400",
   },
   bearish: {
     label: "Bearish",
-    dot: "bg-rose-400",
-    text: "text-rose-300",
-    ring: "ring-rose-500/30",
-    bg: "bg-rose-500/5",
+    dot: "bg-rose-500",
+    text: "text-rose-700",
+    pill: "border-rose-200 bg-rose-50",
+    accent: "border-l-rose-400",
   },
   neutral: {
     label: "Neutral",
-    dot: "bg-zinc-400",
-    text: "text-zinc-300",
-    ring: "ring-zinc-500/20",
-    bg: "bg-transparent",
+    dot: "bg-stone-300",
+    text: "text-stone-500",
+    pill: "border-stone-200 bg-stone-50",
+    accent: "border-l-stone-200",
   },
 };
 
@@ -108,7 +114,7 @@ function StanceBadge({ stance }: { stance: Stance }) {
   const ui = STANCE_UI[stance];
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium ${ui.text} ring-1 ${ui.ring}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${ui.pill} ${ui.text}`}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${ui.dot}`} />
       {ui.label}
@@ -122,9 +128,7 @@ function ImpactMeter({ impact }: { impact: number }) {
       {[1, 2, 3, 4, 5].map((n) => (
         <span
           key={n}
-          className={`h-3 w-1 rounded-sm ${
-            n <= impact ? "bg-amber-400" : "bg-zinc-700"
-          }`}
+          className={`h-3 w-1 rounded-full ${n <= impact ? "bg-amber-400" : "bg-stone-200"}`}
         />
       ))}
     </span>
@@ -132,19 +136,16 @@ function ImpactMeter({ impact }: { impact: number }) {
 }
 
 function BriefCard({ brief }: { brief: Brief }) {
-  const ui = STANCE_UI[brief.bias];
   return (
-    <section
-      className={`rounded-2xl border border-zinc-800 ${ui.bg} p-5 ring-1 ${ui.ring}`}
-    >
+    <section className={`${CARD} p-6`}>
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
-          Daily Brief
-        </h2>
+        <span className={EYEBROW}>Daily Brief</span>
         <StanceBadge stance={brief.bias} />
       </div>
-      <p className="mt-2 text-lg font-semibold text-zinc-100">{brief.headline}</p>
-      <div className="mt-3 space-y-2 text-sm leading-relaxed text-zinc-300">
+      <h2 className="mt-2.5 text-xl font-semibold leading-snug text-stone-900">
+        {brief.headline}
+      </h2>
+      <div className="mt-3 space-y-3 text-[15px] leading-relaxed text-stone-600">
         {brief.summary
           .split(/\n{2,}/)
           .filter(Boolean)
@@ -154,19 +155,16 @@ function BriefCard({ brief }: { brief: Brief }) {
       </div>
 
       {brief.drivers.length > 0 && (
-        <div className="mt-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-            Key drivers
-          </h3>
-          <ul className="mt-2 space-y-2">
+        <div className="mt-5 border-t border-stone-100 pt-4">
+          <h3 className={EYEBROW}>Key drivers</h3>
+          <ul className="mt-2.5 space-y-2.5">
             {brief.drivers.map((d, i) => (
-              <li key={i} className="flex gap-2.5 text-sm">
+              <li key={i} className="flex gap-2.5 text-sm leading-relaxed">
                 <span
-                  className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${STANCE_UI[d.stance].dot}`}
+                  className={`mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full ${STANCE_UI[d.stance].dot}`}
                 />
-                <span className="text-zinc-300">
-                  <span className="font-medium text-zinc-100">{d.title}.</span>{" "}
-                  {d.detail}
+                <span className="text-stone-600">
+                  <span className="font-medium text-stone-900">{d.title}.</span> {d.detail}
                 </span>
               </li>
             ))}
@@ -175,15 +173,13 @@ function BriefCard({ brief }: { brief: Brief }) {
       )}
 
       {brief.watchlist.length > 0 && (
-        <div className="mt-4">
-          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-            Watch today
-          </h3>
-          <ul className="mt-2 flex flex-wrap gap-2">
+        <div className="mt-5 border-t border-stone-100 pt-4">
+          <h3 className={EYEBROW}>Watch today</h3>
+          <ul className="mt-2.5 flex flex-wrap gap-2">
             {brief.watchlist.map((w, i) => (
               <li
                 key={i}
-                className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-2.5 py-1 text-xs text-zinc-300"
+                className="rounded-lg border border-stone-200 bg-stone-50 px-2.5 py-1 text-xs text-stone-600"
               >
                 {w}
               </li>
@@ -191,7 +187,7 @@ function BriefCard({ brief }: { brief: Brief }) {
           </ul>
         </div>
       )}
-      <p className="mt-4 text-[11px] text-zinc-600">
+      <p className="mt-5 text-[11px] text-stone-400">
         Generated {timeAgo(brief.generatedAt)} · decision support, not financial advice
       </p>
     </section>
@@ -203,7 +199,7 @@ function NewsRow({ item }: { item: ClassifiedItem }) {
   const ui = STANCE_UI[c?.stance ?? "neutral"];
   return (
     <article
-      className={`rounded-xl border border-zinc-800/80 ${ui.bg} p-4 transition-colors hover:border-zinc-700`}
+      className={`rounded-xl border border-l-[3px] border-stone-200/80 ${ui.accent} bg-white p-4 shadow-[0_1px_2px_rgba(0,0,0,0.03)] transition hover:shadow-[0_3px_10px_rgba(0,0,0,0.06)]`}
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
@@ -211,31 +207,32 @@ function NewsRow({ item }: { item: ClassifiedItem }) {
             href={item.link}
             target="_blank"
             rel="noreferrer"
-            className="text-sm font-medium text-zinc-100 hover:underline"
+            className="text-[15px] font-medium leading-snug text-stone-900 hover:text-blue-700 hover:underline"
           >
             {item.title}
           </a>
-          <div className="mt-1 flex items-center gap-2 text-xs text-zinc-500">
+          <div className="mt-1 flex items-center gap-1.5 text-xs text-stone-400">
             <span>{item.source}</span>
             <span>·</span>
             <span>{timeAgo(item.publishedAt)}</span>
           </div>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1.5">
-          {c ? <StanceBadge stance={c.stance} /> : (
-            <span className="text-xs text-zinc-600">…</span>
+          {c ? (
+            <StanceBadge stance={c.stance} />
+          ) : (
+            <span className="inline-flex h-5 items-center rounded-full border border-stone-200 bg-stone-50 px-2 text-[11px] text-stone-400">
+              analyzing…
+            </span>
           )}
           {c && c.impact > 0 && <ImpactMeter impact={c.impact} />}
         </div>
       </div>
       {c?.rationale && (
-        <p className="mt-2 text-xs leading-relaxed text-zinc-400">
+        <p className="mt-2 text-[13px] leading-relaxed text-stone-500">
           {c.rationale}
           {c.confidence != null && (
-            <span className="text-zinc-600">
-              {" "}
-              · {Math.round(c.confidence * 100)}% conf
-            </span>
+            <span className="text-stone-400"> · {Math.round(c.confidence * 100)}% conf</span>
           )}
         </p>
       )}
@@ -243,33 +240,43 @@ function NewsRow({ item }: { item: ClassifiedItem }) {
   );
 }
 
-function PriceStrip({ quotes }: { quotes: Quote[] }) {
+function PriceStrip({ quotes, updatedAt }: { quotes: Quote[]; updatedAt: string | null }) {
   if (quotes.length === 0) return null;
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
-      {quotes.map((q) => {
-        const up = q.change >= 0;
-        return (
-          <div key={q.symbol} className="flex items-baseline gap-1.5">
-            <span className="text-xs text-zinc-500">{q.name}</span>
-            <span className="text-sm font-semibold text-zinc-100">
-              {q.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
-            </span>
-            <span className={`text-xs font-medium ${up ? "text-emerald-400" : "text-rose-400"}`}>
-              {up ? "▲" : "▼"} {Math.abs(q.changePct).toFixed(2)}%
-            </span>
-          </div>
-        );
-      })}
+    <div className={`${CARD} flex flex-wrap items-center justify-between gap-x-6 gap-y-2 px-5 py-3`}>
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-1">
+        {quotes.map((q) => {
+          const up = q.change >= 0;
+          return (
+            <div key={q.symbol} className="flex items-baseline gap-1.5">
+              <span className="text-xs text-stone-400">{q.name}</span>
+              <span className="text-sm font-semibold tabular-nums text-stone-900">
+                {q.price.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              </span>
+              <span
+                className={`text-xs font-medium tabular-nums ${up ? "text-emerald-600" : "text-rose-600"}`}
+              >
+                {up ? "▲" : "▼"} {Math.abs(q.changePct).toFixed(2)}%
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      {updatedAt && (
+        <span className="flex items-center gap-1.5 text-[11px] text-stone-400">
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+          Live · {timeAgo(updatedAt)}
+        </span>
+      )}
     </div>
   );
 }
 
-const IMPACT_UI: Record<EventImpact, { dot: string; label: string }> = {
-  high: { dot: "bg-rose-400", label: "High" },
-  medium: { dot: "bg-amber-400", label: "Med" },
-  low: { dot: "bg-zinc-500", label: "Low" },
-  none: { dot: "bg-zinc-600", label: "" },
+const IMPACT_UI: Record<EventImpact, { dot: string }> = {
+  high: { dot: "bg-rose-500" },
+  medium: { dot: "bg-amber-400" },
+  low: { dot: "bg-stone-300" },
+  none: { dot: "bg-stone-200" },
 };
 
 function eventTime(iso: string): string {
@@ -297,22 +304,30 @@ function EventRow({ e, showDay }: { e: CalendarEvent; showDay?: boolean }) {
     if (!Number.isNaN(a) && !Number.isNaN(f) && a !== f) surprise = a > f ? "up" : "down";
   }
   return (
-    <div className="flex items-center gap-2.5 py-1.5 text-xs">
+    <div className="flex items-center gap-2.5 py-2 text-[13px]">
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${ui.dot}`} />
-      <span className="w-24 shrink-0 tabular-nums text-zinc-500">
+      <span className="w-24 shrink-0 tabular-nums text-stone-400">
         {showDay ? `${eventDay(e.date)} ` : ""}
         {eventTime(e.date)} ET
       </span>
-      <span className="w-9 shrink-0 font-medium text-zinc-500">{e.country}</span>
-      <span className="min-w-0 flex-1 truncate text-zinc-200">{e.title}</span>
-      <span className="shrink-0 tabular-nums text-zinc-500">
+      <span className="w-9 shrink-0 font-medium text-stone-400">{e.country}</span>
+      <span className="min-w-0 flex-1 truncate text-stone-700">{e.title}</span>
+      <span className="shrink-0 tabular-nums">
         {e.actual != null ? (
-          <span className={surprise === "up" ? "text-emerald-300" : surprise === "down" ? "text-rose-300" : "text-zinc-200"}>
+          <span
+            className={
+              surprise === "up"
+                ? "text-emerald-600"
+                : surprise === "down"
+                  ? "text-rose-600"
+                  : "text-stone-700"
+            }
+          >
             {e.actual}
             {surprise && (surprise === "up" ? " ↑" : " ↓")}
           </span>
         ) : e.forecast != null ? (
-          <span className="text-zinc-500">f/c {e.forecast}</span>
+          <span className="text-stone-400">f/c {e.forecast}</span>
         ) : null}
       </span>
     </div>
@@ -331,26 +346,24 @@ function CalendarPanel({
   const [tab, setTab] = useState<"today" | "week">("today");
   const hasToday = todayUpcoming.length > 0 || released.length > 0;
   return (
-    <section className="rounded-2xl border border-zinc-800 p-5">
+    <section className={`${CARD} p-6`}>
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-zinc-400">
-          Economic Calendar
-        </h2>
+        <span className={EYEBROW}>Economic Calendar</span>
         <div className="flex gap-1.5">
-          <FilterTab active={tab === "today"} onClick={() => setTab("today")}>
+          <Pill active={tab === "today"} onClick={() => setTab("today")}>
             Today
-          </FilterTab>
-          <FilterTab active={tab === "week"} onClick={() => setTab("week")}>
+          </Pill>
+          <Pill active={tab === "week"} onClick={() => setTab("week")}>
             Rest of week
-          </FilterTab>
+          </Pill>
         </div>
       </div>
 
       {tab === "today" ? (
-        <div className="mt-3 divide-y divide-zinc-900">
+        <div className="mt-3 divide-y divide-stone-100">
           {todayUpcoming.length > 0 && (
             <div className="pb-1">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-amber-400/80">
+              <p className="pt-1 text-[11px] font-semibold uppercase tracking-wider text-amber-600">
                 Still to come
               </p>
               {todayUpcoming.map((e, i) => (
@@ -360,7 +373,7 @@ function CalendarPanel({
           )}
           {released.length > 0 && (
             <div className="pt-2">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-zinc-600">
+              <p className="pt-1 text-[11px] font-semibold uppercase tracking-wider text-stone-400">
                 Released
               </p>
               {released.map((e, i) => (
@@ -369,7 +382,7 @@ function CalendarPanel({
             </div>
           )}
           {!hasToday && (
-            <p className="py-3 text-xs text-zinc-600">No high-impact events left today.</p>
+            <p className="py-3 text-sm text-stone-400">No high-impact events left today.</p>
           )}
         </div>
       ) : (
@@ -377,14 +390,23 @@ function CalendarPanel({
           {later.length > 0 ? (
             later.map((e, i) => <EventRow key={`l${i}`} e={e} showDay />)
           ) : (
-            <p className="py-3 text-xs text-zinc-600">Nothing else scheduled this week.</p>
+            <p className="py-3 text-sm text-stone-400">Nothing else scheduled this week.</p>
           )}
         </div>
       )}
-      <p className="mt-3 text-[11px] text-zinc-600">
+      <p className="mt-3 border-t border-stone-100 pt-3 text-[11px] text-stone-400">
         High-impact + USD events · times US Eastern · via ForexFactory
       </p>
     </section>
+  );
+}
+
+function SkeletonRow() {
+  return (
+    <div className="rounded-xl border border-stone-200/80 bg-white p-4">
+      <div className="h-4 w-3/4 animate-pulse rounded bg-stone-100" />
+      <div className="mt-2 h-3 w-1/4 animate-pulse rounded bg-stone-100" />
+    </div>
   );
 }
 
@@ -626,30 +648,39 @@ export default function Home() {
     return { bull, bear, hot };
   }, [items]);
 
+  const hasCalendar =
+    calendar.todayUpcoming.length > 0 ||
+    calendar.released.length > 0 ||
+    calendar.later.length > 0;
+
   return (
-    <main className="mx-auto max-w-3xl px-4 py-6 sm:py-10">
-      <header className="mb-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight text-zinc-100">
-              <span className="text-amber-400">◆</span> GoldPulse
-            </h1>
-            <p className="mt-0.5 text-xs text-zinc-500">
-              Gold (XAU/USD) news, read for direction
-              {updatedAt && ` · updated ${timeAgo(updatedAt)}`}
-            </p>
+    <div className="min-h-screen">
+      {/* Top bar */}
+      <header className="sticky top-0 z-10 border-b border-stone-200/70 bg-white/85 backdrop-blur-md">
+        <div className="mx-auto flex max-w-3xl items-center justify-between px-5 py-3">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-400/15 text-[15px] text-amber-500">
+              ◆
+            </span>
+            <div className="leading-tight">
+              <h1 className="text-[15px] font-semibold text-stone-900">GoldPulse</h1>
+              <p className="text-[11px] text-stone-400">Gold news, read for direction</p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={toggleAlerts}
               title="Desktop alerts for high-impact bullish/bearish headlines"
-              className={`rounded-lg border px-3 py-1.5 text-xs font-medium ${
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
                 alertsOn
-                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                  : "border-zinc-800 bg-zinc-900 text-zinc-300 hover:border-zinc-700"
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                  : "border-stone-200 bg-white text-stone-600 hover:bg-stone-50"
               }`}
             >
-              {alertsOn ? "🔔 Alerts on" : "🔕 Alerts off"}
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${alertsOn ? "bg-emerald-500" : "bg-stone-300"}`}
+              />
+              {alertsOn ? "Alerts on" : "Alerts"}
             </button>
             <button
               onClick={() => {
@@ -658,94 +689,104 @@ export default function Home() {
                 loadCalendar();
                 loadBrief(true);
               }}
-              className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 hover:border-zinc-700"
+              className="rounded-lg border border-stone-200 bg-white px-3 py-1.5 text-xs font-medium text-stone-600 transition hover:bg-stone-50"
             >
               Refresh
             </button>
           </div>
         </div>
-        {quotes.length > 0 && (
-          <div className="mt-3 rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-2.5">
-            <PriceStrip quotes={quotes} />
-          </div>
-        )}
       </header>
 
-      {!configured && (
-        <div className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-200">
-          <p className="font-medium">No Anthropic API key detected.</p>
-          <p className="mt-1 text-amber-200/80">
-            Add <code className="rounded bg-black/30 px-1">ANTHROPIC_API_KEY</code>{" "}
-            to a <code className="rounded bg-black/30 px-1">.env.local</code> file and
-            restart. The live news feed still loads below — only the AI
-            classification and daily brief need the key.
-          </p>
-        </div>
-      )}
-
-      {brief ? (
-        <div className="mb-4">
-          <BriefCard brief={brief} />
-        </div>
-      ) : configured ? (
-        <div className="mb-4 animate-pulse rounded-2xl border border-zinc-800 p-5 text-sm text-zinc-500">
-          Generating today&apos;s brief…
-        </div>
-      ) : null}
-
-      {(calendar.todayUpcoming.length > 0 ||
-        calendar.released.length > 0 ||
-        calendar.later.length > 0) && (
-        <div className="mb-8">
-          <CalendarPanel
-            released={calendar.released}
-            todayUpcoming={calendar.todayUpcoming}
-            later={calendar.later}
-          />
-        </div>
-      )}
-
-      <div className="mb-3 flex items-center gap-2">
-        <FilterTab active={filter === "all"} onClick={() => setFilter("all")}>
-          All ({items.length})
-        </FilterTab>
-        <FilterTab active={filter === "bullish"} onClick={() => setFilter("bullish")}>
-          <span className="text-emerald-400">▲</span> Bullish ({counts.bull})
-        </FilterTab>
-        <FilterTab active={filter === "bearish"} onClick={() => setFilter("bearish")}>
-          <span className="text-rose-400">▼</span> Bearish ({counts.bear})
-        </FilterTab>
-        <FilterTab
-          active={filter === "high-impact"}
-          onClick={() => setFilter("high-impact")}
-        >
-          <span className="text-amber-400">★</span> High impact ({counts.hot})
-        </FilterTab>
-      </div>
-
-      <section className="space-y-2.5">
-        {loading && items.length === 0 ? (
-          <p className="py-10 text-center text-sm text-zinc-600">
-            Loading news…
-          </p>
-        ) : filtered.length === 0 ? (
-          <p className="py-10 text-center text-sm text-zinc-600">
-            Nothing matches this filter yet.
-          </p>
-        ) : (
-          filtered.map((item) => <NewsRow key={item.id} item={item} />)
+      <main className="mx-auto max-w-3xl px-5 py-6 sm:py-8">
+        {quotes.length > 0 && (
+          <div className="mb-6">
+            <PriceStrip quotes={quotes} updatedAt={updatedAt} />
+          </div>
         )}
-      </section>
 
-      <footer className="mt-10 border-t border-zinc-900 pt-4 text-center text-[11px] text-zinc-700">
-        GoldPulse · free RSS sources · AI classification is probabilistic and for
-        research only — not financial advice.
-      </footer>
-    </main>
+        {!configured && (
+          <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+            <p className="font-medium">No Anthropic API key detected.</p>
+            <p className="mt-1 text-amber-700">
+              Add <code className="rounded bg-amber-100 px-1">ANTHROPIC_API_KEY</code> as an
+              environment variable. The live news feed and calendar still work below — only the
+              AI classification and daily brief need the key.
+            </p>
+          </div>
+        )}
+
+        {brief ? (
+          <div className="mb-6">
+            <BriefCard brief={brief} />
+          </div>
+        ) : configured ? (
+          <div className={`${CARD} mb-6 p-6`}>
+            <span className={EYEBROW}>Daily Brief</span>
+            <div className="mt-3 space-y-2">
+              <div className="h-5 w-2/3 animate-pulse rounded bg-stone-100" />
+              <div className="h-3 w-full animate-pulse rounded bg-stone-100" />
+              <div className="h-3 w-11/12 animate-pulse rounded bg-stone-100" />
+              <div className="h-3 w-4/5 animate-pulse rounded bg-stone-100" />
+            </div>
+            <p className="mt-3 text-xs text-stone-400">Generating today’s brief…</p>
+          </div>
+        ) : null}
+
+        {hasCalendar && (
+          <div className="mb-8">
+            <CalendarPanel
+              released={calendar.released}
+              todayUpcoming={calendar.todayUpcoming}
+              later={calendar.later}
+            />
+          </div>
+        )}
+
+        <div className="mb-3 flex items-center justify-between">
+          <span className={EYEBROW}>Live Feed</span>
+        </div>
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Pill active={filter === "all"} onClick={() => setFilter("all")}>
+            All ({items.length})
+          </Pill>
+          <Pill active={filter === "bullish"} onClick={() => setFilter("bullish")}>
+            <span className="text-emerald-500">▲</span> Bullish ({counts.bull})
+          </Pill>
+          <Pill active={filter === "bearish"} onClick={() => setFilter("bearish")}>
+            <span className="text-rose-500">▼</span> Bearish ({counts.bear})
+          </Pill>
+          <Pill active={filter === "high-impact"} onClick={() => setFilter("high-impact")}>
+            <span className="text-amber-500">★</span> High impact ({counts.hot})
+          </Pill>
+        </div>
+
+        <section className="space-y-2.5">
+          {loading && items.length === 0 ? (
+            <>
+              <SkeletonRow />
+              <SkeletonRow />
+              <SkeletonRow />
+              <SkeletonRow />
+            </>
+          ) : filtered.length === 0 ? (
+            <div className={`${CARD} py-12 text-center text-sm text-stone-400`}>
+              Nothing matches this filter yet.
+            </div>
+          ) : (
+            filtered.map((item) => <NewsRow key={item.id} item={item} />)
+          )}
+        </section>
+
+        <footer className="mt-10 border-t border-stone-200 pt-5 text-center text-[11px] text-stone-400">
+          GoldPulse · free RSS sources · AI classification is probabilistic and for research only
+          — not financial advice.
+        </footer>
+      </main>
+    </div>
   );
 }
 
-function FilterTab({
+function Pill({
   active,
   onClick,
   children,
@@ -757,10 +798,10 @@ function FilterTab({
   return (
     <button
       onClick={onClick}
-      className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+      className={`rounded-full px-3 py-1.5 text-xs font-medium transition ${
         active
-          ? "bg-zinc-100 text-zinc-900"
-          : "border border-zinc-800 bg-zinc-900/60 text-zinc-400 hover:text-zinc-200"
+          ? "bg-stone-900 text-white"
+          : "border border-stone-200 bg-white text-stone-600 hover:bg-stone-50"
       }`}
     >
       {children}
