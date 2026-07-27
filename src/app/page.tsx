@@ -8,6 +8,7 @@ import type {
   ClassifiedItem,
   EventImpact,
   GoldLevels,
+  IccState,
   LevelTimeframe,
   NewsItem,
   PriceLevel,
@@ -945,15 +946,53 @@ const CONVICTION_UI: Record<string, string> = {
   low: "text-amber-600",
 };
 
+function IccStepper({ state }: { state: IccState | null }) {
+  const steps = [
+    { key: "indication", label: "Indication" },
+    { key: "correction", label: "Correction" },
+    { key: "setup", label: "Setup" },
+  ];
+  const active = state ? steps.findIndex((s) => s.key === state.phase) : -1;
+  return (
+    <div className="mt-3 rounded-xl border border-stone-200/80 bg-stone-50/50 p-3">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {steps.map((s, i) => {
+          const done = active > i;
+          const isActive = active === i;
+          return (
+            <span key={s.key} className="flex items-center gap-1.5">
+              <span
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                  isActive
+                    ? "bg-amber-100 text-amber-700 ring-1 ring-amber-300"
+                    : done
+                      ? "bg-emerald-50 text-emerald-600"
+                      : "bg-white text-stone-400 ring-1 ring-stone-200"
+                }`}
+              >
+                <span>{["①", "②", "③"][i]}</span> {s.label}
+              </span>
+              {i < 2 && <span className="text-stone-300">→</span>}
+            </span>
+          );
+        })}
+      </div>
+      {state?.note && <p className="mt-2 text-xs leading-relaxed text-stone-500">{state.note}</p>}
+    </div>
+  );
+}
+
 function RecommendationsCard({
   ideas,
   trades,
   price,
+  icc,
   onTake,
 }: {
   ideas: TradeIdea[];
   trades: Trade[];
   price: number;
+  icc: IccState | null;
   onTake: (idea: TradeIdea) => void;
 }) {
   const resolved = trades.filter((t) => t.status === "win" || t.status === "loss");
@@ -983,6 +1022,8 @@ function RecommendationsCard({
           </span>
         )}
       </div>
+
+      <IccStepper state={icc} />
 
       {ideas.length === 0 ? (
         <p className="mt-3 text-sm text-stone-400">
@@ -1217,6 +1258,7 @@ export default function Home() {
   const [timeframe, setTimeframe] = useState<LevelTimeframe>("daily");
   const [trades, setTrades] = useState<Trade[]>([]);
   const [setups, setSetups] = useState<TradeIdea[]>([]);
+  const [iccState, setIccState] = useState<IccState | null>(null);
   const [calendar, setCalendar] = useState<{
     released: CalendarEvent[];
     todayUpcoming: CalendarEvent[];
@@ -1240,6 +1282,8 @@ export default function Home() {
   // Levels currently "armed" (already alerted) — cleared once price backs off,
   // so we alert once per approach rather than every poll.
   const armedLevels = useRef<Set<string>>(new Set());
+  // ICC stage transitions already alerted (by signature), so each stage pings once.
+  const iccAlerted = useRef<Set<string>>(new Set());
 
   const decorate = useCallback(
     (news: NewsItem[]): ClassifiedItem[] =>
@@ -1505,15 +1549,39 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [levels]);
 
+  const maybeIccAlert = useCallback((state: IccState | null) => {
+    if (!state || !["indication", "correction", "setup"].includes(state.phase)) return;
+    if (!alertsOnRef.current) return;
+    if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+    if (iccAlerted.current.has(state.signature)) return;
+    iccAlerted.current.add(state.signature);
+    try {
+      localStorage.setItem("gp_icc_alerts", JSON.stringify([...iccAlerted.current].slice(-100)));
+    } catch {
+      /* non-fatal */
+    }
+    const stageTitle: Record<string, string> = {
+      indication: "① Indication",
+      correction: "② Correction",
+      setup: "③ Setup ready",
+    };
+    new Notification(`◆ Gold ICC — ${stageTitle[state.phase]}`, {
+      body: state.note,
+      tag: state.signature,
+    });
+  }, []);
+
   const loadSetups = useCallback(async () => {
     try {
       const res = await fetch("/api/setups", { cache: "no-store" });
       const data = await res.json();
       setSetups(data.setups ?? []);
+      setIccState(data.state ?? null);
+      maybeIccAlert(data.state ?? null);
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [maybeIccAlert]);
 
   const loadCalendar = useCallback(async () => {
     try {
@@ -1572,6 +1640,12 @@ export default function Home() {
     const cachedBrief = readBriefCache();
     if (cachedBrief) setBrief(cachedBrief.brief);
     setTrades(readTrades());
+    try {
+      const raw = localStorage.getItem("gp_icc_alerts");
+      if (raw) iccAlerted.current = new Set(JSON.parse(raw));
+    } catch {
+      /* non-fatal */
+    }
 
     setNow(Date.now());
     const clockId = setInterval(() => setNow(Date.now()), 15_000);
@@ -1698,7 +1772,7 @@ export default function Home() {
 
         {levels && (
           <div className="mb-4">
-            <RecommendationsCard ideas={setups} trades={trades} price={levels.price} onTake={takeTrade} />
+            <RecommendationsCard ideas={setups} trades={trades} price={levels.price} icc={iccState} onTake={takeTrade} />
           </div>
         )}
 

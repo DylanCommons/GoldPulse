@@ -131,6 +131,21 @@ export interface TradeIdea {
   rationale: string;
 }
 
+export type IccPhase = "none" | "indication" | "correction" | "setup";
+
+/** Where price is in the Indication → Correction → Continuation sequence. */
+export interface IccState {
+  phase: IccPhase;
+  trend: Trend;
+  direction?: TradeDirection;
+  /** Stable key for this stage instance — used to alert once per transition. */
+  signature: string;
+  note: string;
+  trigger?: number;
+  correctionExtreme?: number;
+  target?: number;
+}
+
 /** A recommendation the trader took — watched to win/loss and logged to learn. */
 export interface Trade {
   id: string;
