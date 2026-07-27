@@ -76,3 +76,24 @@ export interface Quote {
   dayLow: number | null;
   currency: string;
 }
+
+export interface PriceLevel {
+  /** e.g. "R2", "Pivot", "S1". */
+  label: string;
+  price: number;
+  kind: "resistance" | "support" | "pivot";
+}
+
+export interface GoldLevels {
+  price: number;
+  change: number;
+  changePct: number;
+  dayHigh: number | null;
+  dayLow: number | null;
+  yearHigh: number | null;
+  yearLow: number | null;
+  /** ISO date of the session the pivots were computed from. */
+  asOf: string;
+  /** Ordered high → low: resistance above the pivot, support below. */
+  levels: PriceLevel[];
+}

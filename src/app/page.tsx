@@ -7,7 +7,9 @@ import type {
   Classification,
   ClassifiedItem,
   EventImpact,
+  GoldLevels,
   NewsItem,
+  PriceLevel,
   Quote,
   Stance,
 } from "@/lib/types";
@@ -240,6 +242,109 @@ function NewsRow({ item }: { item: ClassifiedItem }) {
   );
 }
 
+function fmtPrice(n: number): string {
+  return n.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+function LevelRow({ level, current }: { level: PriceLevel; current: number }) {
+  const above = level.price > current;
+  const pct = current ? ((level.price - current) / current) * 100 : 0;
+  const isPivot = level.kind === "pivot";
+  const color = isPivot ? "text-stone-400" : above ? "text-rose-600" : "text-emerald-600";
+  const dot = isPivot ? "bg-stone-300" : above ? "bg-rose-400" : "bg-emerald-400";
+  return (
+    <div className="flex items-center justify-between px-3 py-1.5 text-sm">
+      <span className="flex items-center gap-2">
+        <span className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+        <span className="w-12 font-medium text-stone-600">{level.label}</span>
+      </span>
+      <span className="flex items-baseline gap-3">
+        <span className="tabular-nums text-stone-800">${fmtPrice(level.price)}</span>
+        <span className={`w-16 text-right text-xs tabular-nums ${color}`}>
+          {pct >= 0 ? "+" : ""}
+          {pct.toFixed(2)}%
+        </span>
+      </span>
+    </div>
+  );
+}
+
+function LevelsCard({ data }: { data: GoldLevels }) {
+  const up = data.change >= 0;
+  const asOf = new Date(data.asOf).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "America/New_York",
+  });
+
+  // Full ladder: the seven pivot levels plus a marker for the live price,
+  // sorted high → low so the current price sits in its true position.
+  const rows: Array<{ type: "level"; level: PriceLevel } | { type: "current"; price: number }> = [
+    ...data.levels.map((level) => ({ type: "level" as const, level })),
+    { type: "current" as const, price: data.price },
+  ].sort((a, b) => (b.type === "current" ? b.price : b.level.price) - (a.type === "current" ? a.price : a.level.price));
+
+  return (
+    <section className={`${CARD} p-6`}>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <div>
+          <span className={EYEBROW}>Gold · Live Price</span>
+          <div className="mt-1 flex items-baseline gap-2.5">
+            <span className="text-3xl font-semibold tracking-tight tabular-nums text-stone-900">
+              ${fmtPrice(data.price)}
+            </span>
+            <span
+              className={`text-sm font-medium tabular-nums ${up ? "text-emerald-600" : "text-rose-600"}`}
+            >
+              {up ? "▲" : "▼"} {up ? "+" : ""}
+              {fmtPrice(data.change)} ({Math.abs(data.changePct).toFixed(2)}%)
+            </span>
+          </div>
+        </div>
+        <p className="text-xs text-stone-400">
+          {data.dayLow != null && data.dayHigh != null && (
+            <>Day {fmtPrice(data.dayLow)}–{fmtPrice(data.dayHigh)}</>
+          )}
+          {data.yearLow != null && data.yearHigh != null && (
+            <> · 52w {fmtPrice(data.yearLow)}–{fmtPrice(data.yearHigh)}</>
+          )}
+        </p>
+      </div>
+
+      <div className="mt-4 border-t border-stone-100 pt-3">
+        <div className="flex items-center justify-between">
+          <span className={EYEBROW}>Key Levels</span>
+          <span className="text-[11px] text-stone-400">pivots · {asOf} session</span>
+        </div>
+        <div className="mt-2 space-y-0.5">
+          {rows.map((r, i) =>
+            r.type === "current" ? (
+              <div
+                key={i}
+                className="flex items-center justify-between rounded-lg bg-amber-50 px-3 py-2 ring-1 ring-amber-200"
+              >
+                <span className="flex items-center gap-2 text-xs font-semibold text-amber-700">
+                  <span className="text-amber-500">◆</span> Gold now
+                </span>
+                <span className="text-sm font-semibold tabular-nums text-stone-900">
+                  ${fmtPrice(r.price)}
+                </span>
+              </div>
+            ) : (
+              <LevelRow key={i} level={r.level} current={data.price} />
+            )
+          )}
+        </div>
+        <p className="mt-3 text-[11px] leading-relaxed text-stone-400">
+          <span className="text-rose-600">Resistance / supply</span> above ·{" "}
+          <span className="text-emerald-600">support / demand</span> below · floor-trader pivots
+          from real price data
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function PriceStrip({ quotes, updatedAt }: { quotes: Quote[]; updatedAt: string | null }) {
   if (quotes.length === 0) return null;
   return (
@@ -414,6 +519,7 @@ export default function Home() {
   const [brief, setBrief] = useState<Brief | null>(null);
   const [items, setItems] = useState<ClassifiedItem[]>([]);
   const [quotes, setQuotes] = useState<Quote[]>([]);
+  const [levels, setLevels] = useState<GoldLevels | null>(null);
   const [calendar, setCalendar] = useState<{
     released: CalendarEvent[];
     todayUpcoming: CalendarEvent[];
@@ -548,6 +654,16 @@ export default function Home() {
     }
   }, []);
 
+  const loadLevels = useCallback(async () => {
+    try {
+      const res = await fetch("/api/levels", { cache: "no-store" });
+      const data = await res.json();
+      if (data.levels) setLevels(data.levels);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
   const loadCalendar = useCallback(async () => {
     try {
       const res = await fetch("/api/calendar", { cache: "no-store" });
@@ -607,6 +723,7 @@ export default function Home() {
 
     loadFeed();
     loadPrice();
+    loadLevels();
     loadCalendar();
     if (!briefLoaded.current) {
       briefLoaded.current = true;
@@ -614,13 +731,15 @@ export default function Home() {
     }
     const feedId = setInterval(loadFeed, POLL_MS);
     const priceId = setInterval(loadPrice, POLL_MS);
+    const levelsId = setInterval(loadLevels, POLL_MS);
     const calId = setInterval(loadCalendar, CALENDAR_POLL_MS);
     return () => {
       clearInterval(feedId);
       clearInterval(priceId);
+      clearInterval(levelsId);
       clearInterval(calId);
     };
-  }, [loadFeed, loadBrief, loadPrice, loadCalendar]);
+  }, [loadFeed, loadBrief, loadPrice, loadLevels, loadCalendar]);
 
   const filtered = useMemo(() => {
     switch (filter) {
@@ -686,6 +805,7 @@ export default function Home() {
               onClick={() => {
                 loadFeed();
                 loadPrice();
+                loadLevels();
                 loadCalendar();
                 loadBrief(true);
               }}
@@ -699,8 +819,14 @@ export default function Home() {
 
       <main className="mx-auto max-w-3xl px-5 py-6 sm:py-8">
         {quotes.length > 0 && (
-          <div className="mb-6">
+          <div className="mb-4">
             <PriceStrip quotes={quotes} updatedAt={updatedAt} />
+          </div>
+        )}
+
+        {levels && (
+          <div className="mb-6">
+            <LevelsCard data={levels} />
           </div>
         )}
 
