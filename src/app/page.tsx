@@ -18,7 +18,6 @@ import type {
   TradeIdea,
   Trend,
 } from "@/lib/types";
-import { generateRecommendations } from "@/lib/recommend";
 
 const POLL_MS = 60_000;
 const CALENDAR_POLL_MS = 5 * 60_000;
@@ -967,8 +966,8 @@ function RecommendationsCard({
 
       {ideas.length === 0 ? (
         <p className="mt-3 text-sm text-stone-400">
-          No with-trend setup clears your 3R minimum at these levels right now. Wait for price to
-          reach a level, or switch timeframe.
+          No ICC continuation set up right now — waiting for a correction to complete with the
+          trend at ≥3R. Nothing to force.
         </p>
       ) : (
         <div className="mt-3 space-y-2.5">
@@ -996,7 +995,7 @@ function RecommendationsCard({
                 </div>
 
                 <p className="mt-2 text-sm text-stone-800">
-                  If price reaches{" "}
+                  On the {idea.direction === "long" ? "break above" : "break below"}{" "}
                   <span className="font-semibold tabular-nums">${fmtPrice(idea.entry)}</span>{" "}
                   <span className="text-stone-400">({idea.triggerLabel})</span> →{" "}
                   <span className="font-semibold">{idea.direction === "long" ? "long" : "short"}</span>{" "}
@@ -1038,8 +1037,8 @@ function RecommendationsCard({
         </div>
       )}
       <p className="mt-3 text-[11px] leading-relaxed text-stone-400">
-        With-trend plans, ≥3R with a tight structural stop — you still confirm the ICC continuation.
-        Not financial advice.
+        ICC continuation setups from 15m swing structure, with the daily trend, ≥3R into prior
+        demand/supply. Plans, not signals — you confirm the continuation. Not financial advice.
       </p>
     </section>
   );
@@ -1197,6 +1196,7 @@ export default function Home() {
   const [levels, setLevels] = useState<GoldLevels | null>(null);
   const [timeframe, setTimeframe] = useState<LevelTimeframe>("daily");
   const [trades, setTrades] = useState<Trade[]>([]);
+  const [setups, setSetups] = useState<TradeIdea[]>([]);
   const [calendar, setCalendar] = useState<{
     released: CalendarEvent[];
     todayUpcoming: CalendarEvent[];
@@ -1485,10 +1485,15 @@ export default function Home() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [levels]);
 
-  const recommendations = useMemo(
-    () => (levels ? generateRecommendations(levels, brief?.bias ?? "neutral") : []),
-    [levels, brief]
-  );
+  const loadSetups = useCallback(async () => {
+    try {
+      const res = await fetch("/api/setups", { cache: "no-store" });
+      const data = await res.json();
+      setSetups(data.setups ?? []);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const loadCalendar = useCallback(async () => {
     try {
@@ -1554,6 +1559,7 @@ export default function Home() {
     loadFeed();
     loadPrice();
     loadLevels();
+    loadSetups();
     loadCalendar();
     if (!briefLoaded.current) {
       briefLoaded.current = true;
@@ -1562,15 +1568,17 @@ export default function Home() {
     const feedId = setInterval(loadFeed, POLL_MS);
     const priceId = setInterval(loadPrice, POLL_MS);
     const levelsId = setInterval(loadLevels, POLL_MS);
+    const setupsId = setInterval(loadSetups, POLL_MS);
     const calId = setInterval(loadCalendar, CALENDAR_POLL_MS);
     return () => {
       clearInterval(clockId);
       clearInterval(feedId);
       clearInterval(priceId);
       clearInterval(levelsId);
+      clearInterval(setupsId);
       clearInterval(calId);
     };
-  }, [loadFeed, loadBrief, loadPrice, loadLevels, loadCalendar]);
+  }, [loadFeed, loadBrief, loadPrice, loadLevels, loadSetups, loadCalendar]);
 
   const filtered = useMemo(() => {
     switch (filter) {
@@ -1637,6 +1645,7 @@ export default function Home() {
                 loadFeed();
                 loadPrice();
                 loadLevels();
+                loadSetups();
                 loadCalendar();
                 loadBrief(true);
               }}
@@ -1669,12 +1678,7 @@ export default function Home() {
 
         {levels && (
           <div className="mb-4">
-            <RecommendationsCard
-              ideas={recommendations}
-              trades={trades}
-              price={levels.price}
-              onTake={takeTrade}
-            />
+            <RecommendationsCard ideas={setups} trades={trades} price={levels.price} onTake={takeTrade} />
           </div>
         )}
 
