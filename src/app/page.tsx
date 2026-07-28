@@ -382,6 +382,25 @@ function MiniChart({ series, levels, up }: { series: number[]; levels: PriceLeve
     }));
   const nowPct = (y(last) / H) * 100;
 
+  // De-collide the right-axis labels so they never overlap: push clustered
+  // labels apart to a minimum vertical gap (the dashed line stays at the true
+  // level; only the label text is nudged).
+  const MIN_GAP = 8; // percent of chart height
+  const labels = shown
+    .map((l) => ({ ...l, labelY: l.yPct }))
+    .sort((a, b) => a.yPct - b.yPct);
+  for (let i = 1; i < labels.length; i++) {
+    if (labels[i].labelY - labels[i - 1].labelY < MIN_GAP) {
+      labels[i].labelY = labels[i - 1].labelY + MIN_GAP;
+    }
+  }
+  if (labels.length) {
+    const overflow = labels[labels.length - 1].labelY - 98;
+    if (overflow > 0) labels.forEach((l) => (l.labelY -= overflow));
+    const under = 2 - labels[0].labelY;
+    if (under > 0) labels.forEach((l) => (l.labelY += under));
+  }
+
   return (
     // Left gutter = live-price flag; right gutter = level axis. The plot sits
     // between them, so the line/area never run under any label text.
@@ -431,12 +450,12 @@ function MiniChart({ series, levels, up }: { series: number[]; levels: PriceLeve
         />
       </svg>
 
-      {/* right axis: level label + price, sitting entirely in the gutter */}
-      {shown.map((l, i) => (
+      {/* right axis: level label + price, de-collided so nothing overlaps */}
+      {labels.map((l, i) => (
         <span
           key={i}
-          style={{ top: `${l.yPct}%` }}
-          className="pointer-events-none absolute right-0 flex w-[74px] -translate-y-1/2 items-center justify-end gap-1 text-[11px] font-medium tabular-nums"
+          style={{ top: `${l.labelY}%` }}
+          className="pointer-events-none absolute right-0 flex w-[74px] -translate-y-1/2 items-center justify-end gap-1 text-[11px] font-medium leading-none tabular-nums"
         >
           <span className="text-stone-400">{l.label}</span>
           <span style={{ color: l.color }}>{fmtPrice(l.price)}</span>
