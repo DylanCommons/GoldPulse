@@ -284,7 +284,7 @@ function NewsRow({ item }: { item: ClassifiedItem }) {
           <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-stone-400">
             <span>{item.source}</span>
             <span>·</span>
-            <span className="tabular-nums">{clockIST(item.publishedAt)} IST</span>
+            <span className="tabular-nums">{clockIST(item.publishedAt)} Irish</span>
             <span>·</span>
             <span>{timeAgo(item.publishedAt)}</span>
           </div>
@@ -671,7 +671,7 @@ function EventRow({ e, showDay }: { e: CalendarEvent; showDay?: boolean }) {
       <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${ui.dot}`} />
       <span className="w-24 shrink-0 tabular-nums text-stone-400">
         {showDay ? `${eventDay(e.date)} ` : ""}
-        {eventTime(e.date)} IST
+        {eventTime(e.date)} Irish
       </span>
       <span className="w-9 shrink-0 font-medium text-stone-400">{e.country}</span>
       <span className="min-w-0 flex-1 truncate text-stone-700">{e.title}</span>
@@ -758,7 +758,7 @@ function CalendarPanel({
         </div>
       )}
       <p className="mt-3 border-t border-stone-100 pt-3 text-[11px] text-stone-400">
-        High-impact + USD events · times Irish (IST) · via ForexFactory
+        High-impact + USD events · times Irish · via ForexFactory
       </p>
     </section>
   );
@@ -869,7 +869,7 @@ function SessionPanel({ now, upcoming }: { now: number; upcoming: CalendarEvent[
             className={`inline-flex items-center gap-1.5 font-medium ${releaseImminent ? "text-rose-700" : "text-amber-700"}`}
           >
             <span>{releaseImminent ? "⛔" : "⚠️"}</span>
-            Event day: {nextHigh.country} {nextHigh.title} at {eventTime(nextHigh.date)} IST
+            Event day: {nextHigh.country} {nextHigh.title} at {eventTime(nextHigh.date)} Irish
             {nextHighMins != null && nextHighMins >= 0 && <span className="text-stone-400"> · in {fmtDur(nextHighMins)}</span>}
             {releaseImminent && <span className="text-rose-600"> — sit out the release</span>}
           </span>
