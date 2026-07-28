@@ -170,6 +170,16 @@ function timeAgo(iso: string): string {
   return `${Math.floor(h / 24)}d ago`;
 }
 
+// Absolute publish time in Irish time (Europe/Dublin).
+function clockIST(iso: string): string {
+  return new Date(iso).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Europe/Dublin",
+  });
+}
+
 function StanceBadge({ stance }: { stance: Stance }) {
   const ui = STANCE_UI[stance];
   return (
@@ -271,8 +281,10 @@ function NewsRow({ item }: { item: ClassifiedItem }) {
           >
             {item.title}
           </a>
-          <div className="mt-1 flex items-center gap-1.5 text-xs text-stone-400">
+          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-stone-400">
             <span>{item.source}</span>
+            <span>·</span>
+            <span className="tabular-nums">{clockIST(item.publishedAt)} IST</span>
             <span>·</span>
             <span>{timeAgo(item.publishedAt)}</span>
           </div>
